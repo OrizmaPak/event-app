@@ -1,0 +1,21 @@
+"use client";
+
+import { Check, ChevronRight, Clock3, Mail, MessageSquareText, Send, Smartphone, Sparkles } from "lucide-react";
+import { useState } from "react";
+
+const templates = [
+  { id: "reminder", title: "RSVP reminder", note: "For 84 pending guests", subject: "A gentle reminder: The Lumina Gala", body: "Hello {{first_name}},\n\nWe would love to know if you can join us at The Lumina Gala on 24 August. Please use your invitation link to respond.\n\nWarmly,\nVelvet & Vine Experiences" },
+  { id: "details", title: "Event details", note: "For 462 confirmed guests", subject: "Everything you need for The Lumina Gala", body: "Hello {{first_name}},\n\nWe are looking forward to welcoming you. Your personal QR pass, venue details and table information are ready in your confirmation email." },
+  { id: "thankyou", title: "Thank you", note: "Send after the event", subject: "Thank you for celebrating with us", body: "Hello {{first_name}},\n\nThank you for making The Lumina Gala such a beautiful evening. We are grateful you joined us." },
+];
+
+export function MessageComposer() {
+  const [active, setActive] = useState(templates[0]);
+  const [subject, setSubject] = useState(active.subject);
+  const [body, setBody] = useState(active.body);
+  const [channel, setChannel] = useState("email");
+  const [sent, setSent] = useState(false);
+  function select(template: typeof templates[number]) { setActive(template); setSubject(template.subject); setBody(template.body); setSent(false); }
+  function send() { setSent(true); window.setTimeout(() => setSent(false), 2300); }
+  return <div className="messages-layout"><aside className="message-templates"><div className="panel-heading"><div><small>TEMPLATES</small><h2>Start with a message</h2></div></div>{templates.map((template) => <button type="button" key={template.id} className={active.id === template.id ? "active" : ""} onClick={() => select(template)}><span><MessageSquareText size={17} /></span><p><b>{template.title}</b><small>{template.note}</small></p><ChevronRight size={15} /></button>)}<div className="delivery-summary"><Sparkles size={17} /><span><b>Delivery health</b><small>98.7% of recent messages delivered</small></span></div></aside><section className="message-composer dashboard-panel"><div className="composer-head"><div><span className="dashboard-eyebrow">Compose message</span><h2>{active.title}</h2></div><div className="channel-switch"><button className={channel === "email" ? "active" : ""} onClick={() => setChannel("email")}><Mail size={14} /> Email</button><button className={channel === "sms" ? "active" : ""} onClick={() => setChannel("sms")}><Smartphone size={14} /> SMS</button></div></div><div className="recipient-row"><span>TO</span><b>{active.id === "reminder" ? "84 guests awaiting response" : active.id === "details" ? "462 confirmed guests" : "All checked-in guests"}</b><button type="button">Change recipients</button></div><label className="field"><span>Subject</span><input value={subject} onChange={(event) => setSubject(event.target.value)} /></label><label className="field"><span>Message</span><textarea className="message-body" value={body} onChange={(event) => setBody(event.target.value)} /></label><div className="merge-tags"><span>Personalize:</span><button type="button">+ First name</button><button type="button">+ QR pass link</button><button type="button">+ Table</button></div><div className="composer-actions"><span><Check size={14} /> Changes saved</span><button className="button button--outline" type="button"><Clock3 size={15} /> Schedule</button><button className="button button--brand" type="button" onClick={send}>{sent ? <><Check size={15} /> Prepared</> : <><Send size={15} /> Review & send</>}</button></div></section><aside className="message-preview"><div className="message-preview__device"><div className="message-preview__top"><span>NASA.EVENT</span><small>to Amara</small></div><div className="message-preview__email"><small>{subject}</small><div className="email-brand"><i>N</i><b>THE LUMINA GALA</b></div><p>{body.replace("{{first_name}}", "Amara")}</p><button type="button">View my invitation</button><small>Velvet & Vine Experiences · Lagos</small></div></div></aside>{sent && <div className="toast-message">Mock message prepared for review</div>}</div>;
+}

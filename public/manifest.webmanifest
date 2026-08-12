@@ -1,0 +1,12 @@
+{
+  "name": "NASA EVENT",
+  "short_name": "NASA EVENT",
+  "description": "Event invitations, RSVP management and guest check-in.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0a10",
+  "theme_color": "#7557ff",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

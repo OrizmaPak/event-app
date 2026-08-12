@@ -1,0 +1,3 @@
+import Link from "next/link";
+import { Camera, Keyboard, ListChecks, Search } from "lucide-react";
+export function ScannerNav({ active }: { active: "scan" | "manual" | "roster" }) { return <nav className="scanner-nav" aria-label="Check-in methods"><Link className={active === "scan" ? "active" : ""} href="/check-in/lumina-gala"><Camera size={17} /> Scan pass</Link><a href="#backup"><Keyboard size={17} /> Backup scanner</a><Link className={active === "manual" ? "active" : ""} href="/check-in/lumina-gala/manual"><Search size={17} /> Manual lookup</Link><Link className={active === "roster" ? "active" : ""} href="/check-in/lumina-gala/roster"><ListChecks size={17} /> Offline roster</Link></nav>; }

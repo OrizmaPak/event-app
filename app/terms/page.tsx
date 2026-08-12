@@ -1,0 +1,5 @@
+import type { Metadata } from "next";
+import { PublicFooter } from "@/components/public/PublicFooter";
+import { PublicHeader } from "@/components/public/PublicHeader";
+export const metadata: Metadata = { title: "Terms" };
+export default function TermsPage() { return <><PublicHeader /><main className="legal-page"><article className="legal-copy"><span className="eyebrow">Legal</span><h1>Terms of use</h1><p>Prototype content · Last updated 12 August 2026</p><section><h2>Using NASA EVENT</h2><p>Organizers are responsible for the accuracy of published event details, invitations, guest permissions and event-day admission decisions.</p></section><section><h2>Guest passes</h2><p>Each pass is intended for the named guest and relevant event. Reuse, transfer and supervisor exceptions will be governed by the organizer&apos;s event policy.</p></section><section><h2>Prototype notice</h2><p>The current project is a frontend foundation with simulated workflows. Production terms will be reviewed before live accounts, payments or personal data are enabled.</p></section></article></main><PublicFooter /></>; }

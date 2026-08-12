@@ -1,0 +1,5 @@
+import type { Metadata } from "next";
+import { PublicFooter } from "@/components/public/PublicFooter";
+import { PublicHeader } from "@/components/public/PublicHeader";
+export const metadata: Metadata = { title: "Privacy" };
+export default function PrivacyPage() { return <><PublicHeader /><main className="legal-page"><article className="legal-copy"><span className="eyebrow">Legal</span><h1>Privacy notice</h1><p>Prototype content · Last updated 12 August 2026</p><section><h2>Information we use</h2><p>NASA EVENT will use organizer account details, event information and guest RSVP information to provide invitations, guest management, seating, event communication and check-in.</p></section><section><h2>How guest information is shared</h2><p>Guest details are available only to the organizer and authorized event staff for the relevant event. Public event pages do not publish private guest information.</p></section><section><h2>Prototype notice</h2><p>This frontend uses mock information and browser-local preferences. It does not currently submit personal information to a production database or email provider.</p></section></article></main><PublicFooter /></>; }
