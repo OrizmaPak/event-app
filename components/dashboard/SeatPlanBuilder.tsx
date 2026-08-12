@@ -8,6 +8,7 @@ import {
   Copy,
   Grid3X3,
   Minus,
+  Pencil,
   Plus,
   RectangleHorizontal,
   Redo2,
@@ -18,15 +19,17 @@ import {
   Type,
   Undo2,
   UserRoundCheck,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import { compactMoney, demoLayoutObjects, demoPriceBands } from "@/lib/data/seating-data";
+import { compactMoney, demoPriceBands } from "@/lib/data/seating-data";
 import type { LayoutObject, LayoutObjectType, PriceBand, SeatStatus } from "@/lib/data/types";
 
 type SeatEdit = { priceBandId?: string; status?: SeatStatus; note?: string };
 type DragState = { id: string; startX: number; startY: number; objectX: number; objectY: number } | null;
+type BandDraft = { name: string; price: string; color: string };
 
 const tools: { type: LayoutObjectType; label: string; icon: typeof CircleDot }[] = [
   { type: "round-table", label: "Round table", icon: CircleDot },
@@ -55,8 +58,8 @@ function defaults(type: LayoutObjectType, count: number): LayoutObject {
     label: names[type],
     x: 36,
     y: 38,
-    width: type === "row" ? 52 : type === "stage" ? 42 : type === "aisle" ? 8 : type === "label" ? 24 : 25,
-    height: type === "row" ? 14 : type === "stage" ? 13 : type === "aisle" ? 50 : type === "label" ? 9 : 28,
+    width: type === "row" ? 42 : type === "stage" ? 34 : type === "aisle" ? 6 : type === "label" ? 20 : 20,
+    height: type === "row" ? 11 : type === "stage" ? 10 : type === "aisle" ? 40 : type === "label" ? 7 : 22,
     rotation: 0,
     seatCount: type === "seat" ? 1 : seatBearing ? 10 : 0,
     priceBandId: seatBearing ? "band-standard" : undefined,
@@ -71,16 +74,15 @@ function seatPosition(type: LayoutObjectType, index: number, total: number) {
 }
 
 export function SeatPlanBuilder() {
-  const [objects, setObjects] = useState<LayoutObject[]>(demoLayoutObjects);
+  const [objects, setObjects] = useState<LayoutObject[]>([]);
   const [history, setHistory] = useState<LayoutObject[][]>([]);
   const [future, setFuture] = useState<LayoutObject[][]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>(["table-01"]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
-  const [seatEdits, setSeatEdits] = useState<Record<string, SeatEdit>>({
-    "table-02:5": { status: "reserved", note: "Nneka Eze" },
-    "table-03:3": { status: "blocked", note: "Accessibility companion" },
-  });
+  const [seatEdits, setSeatEdits] = useState<Record<string, SeatEdit>>({});
   const [bands, setBands] = useState<PriceBand[]>(demoPriceBands);
+  const [editingBandId, setEditingBandId] = useState<string | null>(null);
+  const [bandDraft, setBandDraft] = useState<BandDraft>({ name: "", price: "", color: "#7557ff" });
   const [zoom, setZoom] = useState(100);
   const [snap, setSnap] = useState(true);
   const [drag, setDrag] = useState<DragState>(null);
@@ -186,10 +188,38 @@ export function SeatPlanBuilder() {
     setSeatEdits((items) => ({ ...items, [selectedSeat]: { ...items[selectedSeat], ...patch } }));
   }
 
-  function addBand() {
-    const band = { id: `band-${Date.now()}`, name: `Price ${bands.length + 1}`, price: 18000, color: "#e05270" };
-    setBands((items) => [...items, band]);
-    if (selected) updateSelected({ priceBandId: band.id });
+  function openNewBand() {
+    setEditingBandId("new");
+    setBandDraft({ name: "", price: "", color: "#7557ff" });
+  }
+
+  function editBand(band: PriceBand) {
+    setEditingBandId(band.id);
+    setBandDraft({ name: band.name, price: String(band.price), color: band.color });
+  }
+
+  function saveBand(event: React.FormEvent) {
+    event.preventDefault();
+    const name = bandDraft.name.trim();
+    const price = Math.max(0, Number(bandDraft.price) || 0);
+    if (!name) return;
+    if (editingBandId === "new") {
+      const band = { id: `band-${Date.now()}`, name, price, color: bandDraft.color };
+      setBands((items) => [...items, band]);
+      if (selected) updateSelected({ priceBandId: band.id });
+    } else {
+      setBands((items) => items.map((band) => band.id === editingBandId ? { ...band, name, price, color: bandDraft.color } : band));
+    }
+    setEditingBandId(null);
+  }
+
+  function deleteBand(id: string) {
+    if (bands.length <= 1) return;
+    const fallback = bands.find((band) => band.id !== id)!;
+    setBands((items) => items.filter((band) => band.id !== id));
+    setObjects((items) => items.map((object) => object.priceBandId === id ? { ...object, priceBandId: fallback.id } : object));
+    setSeatEdits((items) => Object.fromEntries(Object.entries(items).map(([key, edit]) => [key, edit.priceBandId === id ? { ...edit, priceBandId: fallback.id } : edit])));
+    setEditingBandId(null);
   }
 
   return (
@@ -216,13 +246,14 @@ export function SeatPlanBuilder() {
         <aside className="seat-toolbox">
           <small>ADD TO ROOM</small>
           {tools.map((tool) => <button type="button" key={tool.type} onClick={() => addObject(tool.type)}><tool.icon size={16} /><span>{tool.label}</span><Plus size={13} /></button>)}
-          <div className="seat-band-list"><small>PRICE BANDS</small>{bands.map((band) => <div key={band.id}><i style={{ background: band.color }} /><span><b>{band.name}</b><em>{compactMoney(band.price)}</em></span></div>)}<button type="button" onClick={addBand}><Tag size={15} /> Add price band</button></div>
+          <div className="seat-band-list"><small>PRICE BANDS</small>{bands.map((band) => <div key={band.id}><i style={{ background: band.color }} /><span><b>{band.name}</b><em>{compactMoney(band.price)}</em></span><button type="button" onClick={() => editBand(band)} title={`Edit ${band.name}`}><Pencil size={12} /></button></div>)}<button type="button" onClick={openNewBand}><Tag size={15} /> Create price band</button>{editingBandId && <form className="price-band-form" onSubmit={saveBand}><header><b>{editingBandId === "new" ? "New price band" : "Edit price band"}</b><button type="button" onClick={() => setEditingBandId(null)} title="Close form"><X size={13} /></button></header><label><span>Name</span><input autoFocus value={bandDraft.name} onChange={(event) => setBandDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder="e.g. Balcony" /></label><label><span>Price (NGN)</span><input type="number" min="0" step="500" value={bandDraft.price} onChange={(event) => setBandDraft((draft) => ({ ...draft, price: event.target.value }))} placeholder="0 for free" /></label><label><span>Colour</span><div><input type="color" value={bandDraft.color} onChange={(event) => setBandDraft((draft) => ({ ...draft, color: event.target.value }))} /><code>{bandDraft.color}</code></div></label><footer>{editingBandId !== "new" && <button type="button" className="danger" onClick={() => deleteBand(editingBandId)} disabled={bands.length <= 1}>Delete</button>}<button type="submit" disabled={!bandDraft.name.trim()}>Save band</button></footer></form>}</div>
         </aside>
 
         <section className="seat-canvas-shell">
           <div className="seat-canvas__toolbar"><span>{selectedIds.length ? `${selectedIds.length} selected` : "Select an object"}</span><div><button type="button" onClick={() => setZoom((value) => Math.max(60, value - 10))} title="Zoom out"><ZoomOut size={15} /></button><b>{zoom}%</b><button type="button" onClick={() => setZoom((value) => Math.min(140, value + 10))} title="Zoom in"><ZoomIn size={15} /></button></div></div>
           <div className="seat-canvas-viewport">
             <div ref={canvasRef} className="seat-canvas" style={{ transform: `scale(${zoom / 100})` }} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
+              {!objects.length && <div className="seat-canvas-empty"><Armchair size={28} /><b>Your room is empty</b><span>Add a table, row, stage, aisle, or label from the toolbox.</span></div>}
               {objects.map((object) => {
                 const band = bands.find((item) => item.id === object.priceBandId);
                 const isSelected = selectedIds.includes(object.id);
@@ -265,7 +296,7 @@ export function SeatPlanBuilder() {
               <label><span>Label</span><input value={selected.label} onChange={(event) => updateSelected({ label: event.target.value })} /></label>
               {selected.seatCount > 0 && <><label><span>Number of seats</span><input type="number" min="1" max="30" value={selected.seatCount} onChange={(event) => updateSelected({ seatCount: Math.max(1, Number(event.target.value)) })} /></label><label><span>Price band</span><select value={selected.priceBandId} onChange={(event) => updateSelected({ priceBandId: event.target.value })}>{bands.map((band) => <option value={band.id} key={band.id}>{band.name} · {compactMoney(band.price)}</option>)}</select></label></>}
               <div className="seat-inspector__actions"><button type="button" onClick={() => updateSelected({ rotation: (selected.rotation + 45) % 360 })}><RotateCw size={15} /> Rotate</button><button type="button" onClick={duplicate}><Copy size={15} /> Duplicate</button></div>
-              <label><span>Width</span><div className="stepper"><button type="button" onClick={() => updateSelected({ width: Math.max(5, selected.width - 2) })}><Minus size={13} /></button><b>{selected.width}%</b><button type="button" onClick={() => updateSelected({ width: Math.min(90, selected.width + 2) })}><Plus size={13} /></button></div></label>
+              <div className="dimension-controls"><label><span>Width</span><div className="stepper"><button type="button" onClick={() => updateSelected({ width: Math.max(4, selected.width - 2) })}><Minus size={13} /></button><b>{selected.width}%</b><button type="button" onClick={() => updateSelected({ width: Math.min(90, selected.width + 2) })}><Plus size={13} /></button></div></label><label><span>Height</span><div className="stepper"><button type="button" onClick={() => updateSelected({ height: Math.max(4, selected.height - 2) })}><Minus size={13} /></button><b>{selected.height}%</b><button type="button" onClick={() => updateSelected({ height: Math.min(90, selected.height + 2) })}><Plus size={13} /></button></div></label></div>
             </>}
           </> : <div className="seat-inspector__empty"><Armchair size={25} /><b>Select an object</b><span>Choose a table, row, seat, stage, aisle, or label to edit it.</span></div>}
         </aside>
