@@ -1,5 +1,6 @@
 import { events, guests, organizers, tables, team } from "@/lib/data/mock-data";
 import type { EventRecord, Guest, Organizer, TableRecord, TeamMember } from "@/lib/data/types";
+import { getDatabaseEvent, listDatabaseDiscoveryEvents } from "@/lib/db/events";
 
 export interface NasaEventClient {
   listPublishedEvents(): Promise<EventRecord[]>;
@@ -17,9 +18,15 @@ export interface NasaEventClient {
  */
 export const nasaClient: NasaEventClient = {
   async listPublishedEvents() {
-    return events.filter((event) => event.status === "published");
+    if (process.env.DATABASE_URL) {
+      try { return await listDatabaseDiscoveryEvents(); } catch (error) { console.warn("Database event listing unavailable; using demo records.", error); }
+    }
+    return events.filter((event) => event.status === "published" && (event.visibility === "public" || event.privateListing === "listed"));
   },
   async getEvent(slug) {
+    if (process.env.DATABASE_URL) {
+      try { return await getDatabaseEvent(slug); } catch (error) { console.warn("Database event lookup unavailable; using demo records.", error); }
+    }
     return events.find((event) => event.slug === slug) ?? null;
   },
   async listOrganizers() {

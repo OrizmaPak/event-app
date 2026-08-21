@@ -1,5 +1,13 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1787317924954,
+      "tag": "0000_remarkable_excalibur",
+      "breakpoints": true
+    }
+  ]
 }

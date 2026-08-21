@@ -63,6 +63,7 @@ export function OrganizerShell({ children }: { children: React.ReactNode }) {
   const [eventMenuOpen, setEventMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState(events[0].id);
+  const [serverNotifications, setServerNotifications] = useState<Array<{ id: string; title: string; body: string; createdAt: string; readAt?: string | null }>>([]);
 
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === selectedEventId) ?? events[0],
@@ -74,6 +75,10 @@ export function OrganizerShell({ children }: { children: React.ReactNode }) {
     if (storedEventId && events.some((event) => event.id === storedEventId)) {
       setSelectedEventId(storedEventId);
     }
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/organizer/notifications").then((response) => response.ok ? response.json() : null).then((payload: any) => { if (payload?.data) setServerNotifications(payload.data); }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -94,6 +99,7 @@ export function OrganizerShell({ children }: { children: React.ReactNode }) {
 
   function logout() {
     window.localStorage.removeItem("nasa-organizer-session");
+    void fetch("/api/auth/demo", { method: "DELETE" });
     window.location.href = "/organizer/login";
   }
 
@@ -229,6 +235,13 @@ export function OrganizerShell({ children }: { children: React.ReactNode }) {
                     <span><Bell size={17} /> Notifications</span>
                     <button type="button" onClick={() => setNotificationsOpen(false)}>Close</button>
                   </header>
+
+                  {serverNotifications.slice(0, 4).map((item) => (
+                    <button className={`notification-item${item.readAt ? "" : " unread"}`} key={item.id} type="button" role="menuitem">
+                      <span className="notification-avatar notification-avatar--mint"><Mail size={17} /></span>
+                      <p><b>{item.title}</b><small>{item.body}</small><time>{new Intl.DateTimeFormat("en-NG", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(new Date(item.createdAt))}</time></p>
+                    </button>
+                  ))}
 
                   <button className="notification-item unread" type="button" role="menuitem">
                     <span className="notification-avatar">SA</span>

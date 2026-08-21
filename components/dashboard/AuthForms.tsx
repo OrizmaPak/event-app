@@ -12,9 +12,11 @@ export function LoginForm() {
   const [password, setPassword] = useState("demo1234");
   const [busy, setBusy] = useState(false);
 
-  function submit(event: React.FormEvent) {
+  async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
+    const response = await fetch("/api/auth/demo", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email }) }).catch(() => null);
+    if (!response?.ok) { setBusy(false); return; }
     window.localStorage.setItem("nasa-organizer-session", JSON.stringify({ email, name: "John Oreva", role: "Owner", mode: "mock" }));
     window.setTimeout(() => { window.location.href = search.get("returnTo") || "/organizer"; }, 550);
   }
@@ -24,9 +26,11 @@ export function LoginForm() {
 
 export function RegisterForm() {
   const [busy, setBusy] = useState(false);
-  function submit(event: React.FormEvent<HTMLFormElement>) {
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
+    const response = await fetch("/api/auth/demo", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "john@nasaevent.demo" }) }).catch(() => null);
+    if (!response?.ok) { setBusy(false); return; }
     window.localStorage.setItem("nasa-organizer-session", JSON.stringify({ email: "john@nasaevent.demo", name: "John Oreva", role: "Owner", mode: "mock" }));
     window.setTimeout(() => { window.location.href = "/organizer/onboarding"; }, 550);
   }

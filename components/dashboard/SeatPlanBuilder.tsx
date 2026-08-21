@@ -7,7 +7,9 @@ import {
   Columns3,
   Copy,
   Grid3X3,
+  Maximize2,
   Minus,
+  Minimize2,
   Pencil,
   Plus,
   RectangleHorizontal,
@@ -23,7 +25,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { compactMoney, demoPriceBands } from "@/lib/data/seating-data";
 import type { LayoutObject, LayoutObjectType, PriceBand, SeatStatus } from "@/lib/data/types";
 
@@ -73,8 +75,8 @@ function seatPosition(type: LayoutObjectType, index: number, total: number) {
   return { left: `${50 + Math.cos(angle) * 45}%`, top: `${50 + Math.sin(angle) * 45}%` };
 }
 
-export function SeatPlanBuilder() {
-  const [objects, setObjects] = useState<LayoutObject[]>([]);
+export function SeatPlanBuilder({ initialObjects = [], heading = "Design the guest view", eyebrow = "Freeform room planner" }: { initialObjects?: LayoutObject[]; heading?: string; eyebrow?: string }) {
+  const [objects, setObjects] = useState<LayoutObject[]>(() => initialObjects.map((object) => ({ ...object })));
   const [history, setHistory] = useState<LayoutObject[][]>([]);
   const [future, setFuture] = useState<LayoutObject[][]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -84,8 +86,14 @@ export function SeatPlanBuilder() {
   const [editingBandId, setEditingBandId] = useState<string | null>(null);
   const [bandDraft, setBandDraft] = useState<BandDraft>({ name: "", price: "", color: "#7557ff" });
   const [zoom, setZoom] = useState(100);
+  const [canvasWidth, setCanvasWidth] = useState(initialObjects.length ? 1180 : 980);
+  const [canvasHeight, setCanvasHeight] = useState(initialObjects.length ? 820 : 700);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
+  const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const [snap, setSnap] = useState(true);
   const [drag, setDrag] = useState<DragState>(null);
+  const builderRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   const selected = objects.find((object) => object.id === selectedIds[0]) ?? null;
@@ -102,6 +110,17 @@ export function SeatPlanBuilder() {
     if (object.type === "aisle" || other.type === "aisle") return false;
     return object.x < other.x + other.width && object.x + object.width > other.x && object.y < other.y + other.height && object.y + object.height > other.y;
   })).map((item) => item.id), [objects]);
+
+  useEffect(() => {
+    setFullscreenSupported(document.fullscreenEnabled);
+
+    function syncNativeFullscreen() {
+      setIsNativeFullscreen(document.fullscreenElement === builderRef.current);
+    }
+
+    document.addEventListener("fullscreenchange", syncNativeFullscreen);
+    return () => document.removeEventListener("fullscreenchange", syncNativeFullscreen);
+  }, []);
 
   function commit(next: LayoutObject[]) {
     setHistory((items) => [...items.slice(-19), objects]);
@@ -222,14 +241,35 @@ export function SeatPlanBuilder() {
     setEditingBandId(null);
   }
 
+  async function toggleNativeFullscreen() {
+    const node = builderRef.current;
+    if (!node || !fullscreenSupported) return;
+
+    if (document.fullscreenElement === node) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    if (document.fullscreenElement) await document.exitFullscreen();
+    await node.requestFullscreen();
+  }
+
   return (
-    <div className="seat-builder">
+    <div ref={builderRef} className={`seat-builder ${isFullscreen ? "seat-builder--fullscreen" : ""} ${isNativeFullscreen ? "seat-builder--native-fullscreen" : ""}`}>
       <header className="seat-builder__top">
-        <div><span className="dashboard-eyebrow">Freeform room planner</span><h2>Design the guest view</h2></div>
+        <div><span className="dashboard-eyebrow">{eyebrow}</span><h2>{heading}</h2></div>
         <div className="seat-builder__history">
           <button type="button" onClick={undo} disabled={!history.length} title="Undo"><Undo2 size={16} /></button>
           <button type="button" onClick={redo} disabled={!future.length} title="Redo"><Redo2 size={16} /></button>
           <button type="button" className={snap ? "active" : ""} onClick={() => setSnap(!snap)}><Grid3X3 size={15} /> Snap</button>
+          <button type="button" className={isFullscreen ? "active" : ""} onClick={() => setIsFullscreen((value) => !value)} title={isFullscreen ? "Exit fullscreen planner" : "Expand planner fullscreen"} aria-pressed={isFullscreen}>
+            {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            {isFullscreen ? "Exit" : "Expand"}
+          </button>
+          <button type="button" className={isNativeFullscreen ? "active" : ""} onClick={toggleNativeFullscreen} title={isNativeFullscreen ? "Exit browser fullscreen" : "Open focused browser fullscreen"} aria-pressed={isNativeFullscreen} disabled={!fullscreenSupported}>
+            {isNativeFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            {isNativeFullscreen ? "Close full" : "Full screen"}
+          </button>
         </div>
       </header>
 
@@ -250,9 +290,30 @@ export function SeatPlanBuilder() {
         </aside>
 
         <section className="seat-canvas-shell">
-          <div className="seat-canvas__toolbar"><span>{selectedIds.length ? `${selectedIds.length} selected` : "Select an object"}</span><div><button type="button" onClick={() => setZoom((value) => Math.max(60, value - 10))} title="Zoom out"><ZoomOut size={15} /></button><b>{zoom}%</b><button type="button" onClick={() => setZoom((value) => Math.min(140, value + 10))} title="Zoom in"><ZoomIn size={15} /></button></div></div>
+          <div className="seat-canvas__toolbar">
+            <span>{selectedIds.length ? `${selectedIds.length} selected` : "Select an object"}</span>
+            <div className="seat-canvas__controls">
+              <span className="seat-canvas__size-controls">
+                <em>W</em>
+                <button type="button" onClick={() => setCanvasWidth((value) => Math.max(760, value - 120))} title="Narrow workspace"><Minus size={15} /></button>
+                <b>{canvasWidth}px</b>
+                <button type="button" onClick={() => setCanvasWidth((value) => Math.min(1800, value + 120))} title="Widen workspace"><Plus size={15} /></button>
+              </span>
+              <span className="seat-canvas__size-controls">
+                <em>H</em>
+                <button type="button" onClick={() => setCanvasHeight((value) => Math.max(560, value - 120))} title="Shorten workspace"><Minus size={15} /></button>
+                <b>{canvasHeight}px</b>
+                <button type="button" onClick={() => setCanvasHeight((value) => Math.min(1500, value + 120))} title="Extend workspace"><Plus size={15} /></button>
+              </span>
+              <span className="seat-canvas__zoom-controls">
+                <button type="button" onClick={() => setZoom((value) => Math.max(60, value - 10))} title="Zoom out"><ZoomOut size={15} /></button>
+                <b>{zoom}%</b>
+                <button type="button" onClick={() => setZoom((value) => Math.min(140, value + 10))} title="Zoom in"><ZoomIn size={15} /></button>
+              </span>
+            </div>
+          </div>
           <div className="seat-canvas-viewport">
-            <div ref={canvasRef} className="seat-canvas" style={{ transform: `scale(${zoom / 100})` }} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
+            <div ref={canvasRef} className="seat-canvas" style={{ width: `max(100%, ${canvasWidth}px)`, height: canvasHeight, transform: `scale(${zoom / 100})` }} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
               {!objects.length && <div className="seat-canvas-empty"><Armchair size={28} /><b>Your room is empty</b><span>Add a table, row, stage, aisle, or label from the toolbox.</span></div>}
               {objects.map((object) => {
                 const band = bands.find((item) => item.id === object.priceBandId);

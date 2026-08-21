@@ -1,22 +1,6 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import { ThemeProvider } from "@/components/shared/ThemeProvider";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-const dashboardFont = Space_Grotesk({
-  variable: "--font-dashboard",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: {
@@ -41,9 +25,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} ${dashboardFont.variable} antialiased`}
-      >
+      <body>
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>

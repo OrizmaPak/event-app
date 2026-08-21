@@ -8,17 +8,20 @@ import {
   Check,
   Eye,
   Globe2,
-  ImagePlus,
   Lock,
   Plus,
   Sparkles,
   Tags,
   Ticket,
+  Trash2,
   UserRoundCog,
   UsersRound,
+  X,
 } from "lucide-react";
 import { useState } from "react";
-import type { AdmissionMode, PricingMode } from "@/lib/data/types";
+import { events } from "@/lib/data/mock-data";
+import type { AdmissionMode, PricingMode, TicketCategory } from "@/lib/data/types";
+import { EventPageBuilder } from "./EventPageBuilder";
 import { SeatPlanBuilder } from "./SeatPlanBuilder";
 
 const steps = ["Event basics", "Event page", "Admission & seating", "Guest details", "Review & publish"];
@@ -29,6 +32,56 @@ const admissionOptions: { id: AdmissionMode; title: string; body: string; icon: 
   { id: "selectable", title: "Guests pick seats", body: "Guests choose exact available seats from your plan.", icon: Armchair },
 ];
 
+const initialTicketCategories: TicketCategory[] = [
+  { id: "ticket-standard", name: "Standard", description: "General event admission", price: 12000, quantityAvailable: 250, color: "#7557ff" },
+  { id: "ticket-vip", name: "VIP", description: "Priority access and VIP benefits", price: 35000, quantityAvailable: 50, color: "#d28a28" },
+];
+
+type QuestionType = "short_text" | "long_text" | "email" | "phone" | "number" | "date" | "time" | "single_choice" | "multi_choice" | "checkbox" | "consent" | "file" | "rating";
+type QuestionScope = "buyer" | "each_attendee" | "booking";
+
+interface CustomQuestion {
+  id: string;
+  label: string;
+  type: QuestionType;
+  scope: QuestionScope;
+  required: boolean;
+  placeholder: string;
+  helpText: string;
+  options: string[];
+  min: string;
+  max: string;
+}
+
+const questionTypes: { id: QuestionType; label: string; needsOptions?: boolean; supportsRange?: boolean }[] = [
+  { id: "short_text", label: "Short answer" },
+  { id: "long_text", label: "Long answer" },
+  { id: "email", label: "Email" },
+  { id: "phone", label: "Phone number" },
+  { id: "number", label: "Number", supportsRange: true },
+  { id: "date", label: "Date" },
+  { id: "time", label: "Time" },
+  { id: "single_choice", label: "Single choice", needsOptions: true },
+  { id: "multi_choice", label: "Multiple choice", needsOptions: true },
+  { id: "checkbox", label: "Checkbox" },
+  { id: "consent", label: "Agreement / consent" },
+  { id: "file", label: "File upload" },
+  { id: "rating", label: "Rating scale", supportsRange: true },
+];
+
+const emptyQuestionDraft: CustomQuestion = {
+  id: "",
+  label: "",
+  type: "short_text",
+  scope: "each_attendee",
+  required: false,
+  placeholder: "",
+  helpText: "",
+  options: ["Option 1", "Option 2"],
+  min: "",
+  max: "",
+};
+
 export function EventWizard() {
   const [step, setStep] = useState(1);
   const [title, setTitle] = useState("The Lumina Gala 2026");
@@ -36,30 +89,121 @@ export function EventWizard() {
   const [accent, setAccent] = useState("#7557ff");
   const [pricingMode, setPricingMode] = useState<PricingMode>("paid");
   const [admissionMode, setAdmissionMode] = useState<AdmissionMode>("selectable");
+  const [ticketCategories, setTicketCategories] = useState<TicketCategory[]>(initialTicketCategories);
+  const [customQuestions, setCustomQuestions] = useState<CustomQuestion[]>([]);
+  const [questionModalOpen, setQuestionModalOpen] = useState(false);
+  const [questionDraft, setQuestionDraft] = useState<CustomQuestion>(emptyQuestionDraft);
   const [published, setPublished] = useState(false);
   const stepCount = steps.length;
 
-  function next() { setStep(Math.min(stepCount, step + 1)); }
+  function saveAdmissionSettings() {
+    window.localStorage.setItem("nasa-demo-event-settings", JSON.stringify({ pricingMode, admissionMode, currency: "NGN", ticketCategories: ticketCategories.map((category) => ({ ...category, price: pricingMode === "free" ? 0 : category.price })) }));
+  }
+  function next() {
+    if (step === 3) saveAdmissionSettings();
+    setStep(Math.min(stepCount, step + 1));
+  }
   function back() { setStep(Math.max(1, step - 1)); }
   function publish() {
     setPublished(true);
-    window.localStorage.setItem("nasa-demo-event-settings", JSON.stringify({ pricingMode, admissionMode, currency: "NGN" }));
+    saveAdmissionSettings();
     window.setTimeout(() => { window.location.href = "/organizer/events/lumina-gala"; }, 750);
   }
+  function openQuestionModal() {
+    setQuestionDraft({ ...emptyQuestionDraft, id: `question-${Date.now()}` });
+    setQuestionModalOpen(true);
+  }
+  function editQuestion(question: CustomQuestion) {
+    setQuestionDraft({ ...question, options: question.options.length ? question.options : ["Option 1", "Option 2"] });
+    setQuestionModalOpen(true);
+  }
+  function saveQuestion(question: CustomQuestion) {
+    const selectedType = questionTypes.find((type) => type.id === question.type);
+    const normalizedQuestion = {
+      ...question,
+      label: question.label.trim(),
+      placeholder: question.placeholder.trim(),
+      helpText: question.helpText.trim(),
+      options: selectedType?.needsOptions ? question.options.map((option) => option.trim()).filter(Boolean) : [],
+    };
+    if (!normalizedQuestion.label) return;
+    setCustomQuestions((questions) => questions.some((item) => item.id === normalizedQuestion.id) ? questions.map((item) => item.id === normalizedQuestion.id ? normalizedQuestion : item) : [...questions, normalizedQuestion]);
+    setQuestionModalOpen(false);
+  }
+  function removeQuestion(id: string) {
+    setCustomQuestions((questions) => questions.filter((question) => question.id !== id));
+  }
 
-  return <div className={`event-wizard ${step === 3 && admissionMode !== "general" ? "event-wizard--planner" : ""}`}>
+  const draftEvent = { ...events[0], title, shortTitle: title, accent };
+
+  return <div className={`event-wizard ${step === 2 ? "event-wizard--page-builder" : step === 3 ? "event-wizard--planner" : ""}`}>
     <header className="wizard-top"><Link href="/organizer/events"><ArrowLeft size={16} /> Events</Link><span>New event</span><button type="button">Save draft</button></header>
     <div className="wizard-progress">{steps.map((label, index) => <div className={step >= index + 1 ? "active" : ""} key={label}><i>{step > index + 1 ? <Check size={13} /> : index + 1}</i><span><b>{label}</b><small>{index === 0 ? "Name, date & venue" : index === 1 ? "Look and information" : index === 2 ? "Tickets, prices & room" : index === 3 ? "Names and passes" : "Check everything"}</small></span></div>)}</div>
     <div className="wizard-body">
       <section className="wizard-form">
-        {step === 1 && <><span className="eyebrow">Step 1 of {stepCount}</span><h1>Let&apos;s start with the basics.</h1><p>You can change any of these details later.</p><div className="field-grid"><label className="field field--full"><span>Event name</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label className="field"><span>Event type</span><select defaultValue="Celebration"><option>Celebration</option><option>Conference</option><option>Wedding</option><option>Community event</option></select></label><label className="field"><span>Who can see it?</span><select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">Public - discoverable</option><option value="private">Private - invitation link only</option></select></label><label className="field"><span>Start date</span><input type="date" defaultValue="2026-08-24" /></label><label className="field"><span>Start time</span><input type="time" defaultValue="18:00" /></label><label className="field field--full"><span>Venue</span><input defaultValue="The Monarch Event Centre, Lagos" /></label></div></>}
-        {step === 2 && <><span className="eyebrow">Step 2 of {stepCount}</span><h1>Give the page its personality.</h1><p>Choose a colour, write the story and see the guest page update beside you.</p><button className="cover-upload" type="button"><ImagePlus size={22} /><span><b>Add event cover</b><small>Upload a wide JPG or PNG · 1600 × 900 recommended</small></span></button><label className="field"><span>Short invitation line</span><input defaultValue="An evening in full colour" /></label><label className="field"><span>Event description</span><textarea defaultValue="A radiant night of dining, live music and unforgettable company." /></label><div className="theme-picker"><span>Event colour</span><div>{["#7557ff", "#078b9a", "#e05270", "#d28a28", "#27845b"].map((color) => <button key={color} className={accent === color ? "active" : ""} style={{ background: color }} onClick={() => setAccent(color)} type="button" aria-label={`Use ${color}`} />)}<label><Plus size={15} /><input type="color" value={accent} onChange={(event) => setAccent(event.target.value)} /></label></div></div></>}
-        {step === 3 && <div className="admission-step"><div className="admission-step__intro"><span className="eyebrow">Step 3 of {stepCount}</span><h1>How will guests enter?</h1><p>Pricing and seating are independent. Choose the setup that fits this event.</p></div><div className="pricing-choice" role="group" aria-label="Event pricing"><button type="button" className={pricingMode === "free" ? "active" : ""} onClick={() => setPricingMode("free")}><span><Ticket size={18} /></span><b>Free event</b><small>Every publicly bookable place is free.</small></button><button type="button" className={pricingMode === "paid" ? "active" : ""} onClick={() => setPricingMode("paid")}><span><Tags size={18} /></span><b>Paid event</b><small>Use multiple prices, including complimentary seats.</small></button></div><div className="admission-choice" role="group" aria-label="Admission style">{admissionOptions.map((option) => <button type="button" key={option.id} className={admissionMode === option.id ? "active" : ""} onClick={() => setAdmissionMode(option.id)}><i>{admissionMode === option.id ? <Check size={14} /> : <option.icon size={17} />}</i><span><b>{option.title}</b><small>{option.body}</small></span></button>)}</div>{admissionMode === "general" ? <div className="general-admission-note"><UsersRound size={22} /><div><b>No seating plan required</b><span>Guests will choose their quantity and enter every attendee&apos;s name. You can still create Standard, VIP, or complimentary ticket tiers.</span></div></div> : <SeatPlanBuilder />}</div>}
-        {step === 4 && <><span className="eyebrow">Step 4 of {stepCount}</span><h1>Know every person attending.</h1><p>One buyer can book any available quantity, but every place must have an attendee name.</p><div className="form-question-list"><div><i>1</i><span><b>Buyer name and email</b><small>Required · Booking owner</small></span><em>Required</em></div><div><i>2</i><span><b>Attendee name for every place</b><small>Required · Used at check-in</small></span><em>Required</em></div><div><i>3</i><span><b>Dietary or accessibility note</b><small>Optional per attendee</small></span><em>Optional</em></div><div><i>4</i><span><b>One group QR pass</b><small>Supports partial group arrival</small></span><em>Enabled</em></div></div><button className="button button--outline" type="button"><Plus size={15} /> Add a question</button><label className="switch-card"><input type="checkbox" defaultChecked /><span><b>Allow partial group check-in</b><small>Door staff select the people who are physically present.</small></span></label></>}
+        {step === 1 && <><span className="eyebrow">Step 1 of {stepCount}</span><h1>Let&apos;s start with the basics.</h1><p>Visibility, pricing and admission are separate choices. A private event may still be free or paid.</p><div className="field-grid"><label className="field field--full"><span>Event name</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label className="field"><span>Event type</span><select defaultValue="Celebration"><option>Celebration</option><option>Conference</option><option>Wedding</option><option>Community event</option></select></label><label className="field"><span>Visibility & guest access</span><select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">Public · listed and open</option><option value="private-listed">Private · listed with invitation gate</option><option value="private-unlisted">Private · hidden, invitation link only</option></select><small>Private guests enter their email and unique invitation code.</small></label><label className="field"><span>Start date</span><input type="date" defaultValue="2026-08-24" /></label><label className="field"><span>Start time</span><input type="time" defaultValue="18:00" /></label><label className="field field--full"><span>Venue</span><input defaultValue="The Monarch Event Centre, Lagos" /></label></div></>}
+        {step === 2 && <EventPageBuilder event={draftEvent} />}
+        {step === 3 && <div className={`admission-step admission-step--${admissionMode}`}><div className="admission-step__intro"><span className="eyebrow">Step 3 of {stepCount}</span><h1>How will guests enter?</h1><p>Ticket categories sell quantities. Seat price bands price specific positions in a room.</p></div><div className="pricing-choice" role="group" aria-label="Event pricing"><button type="button" className={pricingMode === "free" ? "active" : ""} onClick={() => setPricingMode("free")}><span><Ticket size={18} /></span><b>Free event</b><small>Every category or publicly bookable seat is free.</small></button><button type="button" className={pricingMode === "paid" ? "active" : ""} onClick={() => setPricingMode("paid")}><span><Tags size={18} /></span><b>Paid event</b><small>Set category prices or seat price bands.</small></button></div><div className="admission-choice" role="group" aria-label="Admission style">{admissionOptions.map((option) => <button type="button" key={option.id} className={admissionMode === option.id ? "active" : ""} onClick={() => setAdmissionMode(option.id)}><i>{admissionMode === option.id ? <Check size={14} /> : <option.icon size={17} />}</i><span><b>{option.title}</b><small>{option.body}</small></span></button>)}</div>{admissionMode === "general" ? <TicketCategoryEditor categories={ticketCategories} pricingMode={pricingMode} onChange={setTicketCategories} /> : <SeatPlanBuilder />}</div>}
+        {step === 4 && <><span className="eyebrow">Step 4 of {stepCount}</span><h1>Know every person attending.</h1><p>One buyer can book any available quantity, but every place must have an attendee name.</p><div className="form-question-list"><div><i>1</i><span><b>Buyer name and email</b><small>Required · Booking owner</small></span><em>Required</em></div><div><i>2</i><span><b>Attendee name for every place</b><small>Required · Used at check-in</small></span><em>Required</em></div><div><i>3</i><span><b>Dietary or accessibility note</b><small>Optional per attendee</small></span><em>Optional</em></div><div><i>4</i><span><b>One group QR pass</b><small>Supports partial group arrival</small></span><em>Enabled</em></div>{customQuestions.map((question, index) => <div key={question.id} className="custom-question-row"><i>{index + 5}</i><span><b>{question.label}</b><small>{questionTypeLabel(question.type)} · {questionScopeLabel(question.scope)}{question.options.length ? ` · ${question.options.length} options` : ""}</small></span><em>{question.required ? "Required" : "Optional"}</em><button type="button" onClick={() => editQuestion(question)}>Edit</button><button type="button" onClick={() => removeQuestion(question.id)} aria-label={`Delete ${question.label}`}><Trash2 size={15} /></button></div>)}</div><button className="button button--outline" type="button" onClick={openQuestionModal}><Plus size={15} /> Add a question</button><label className="switch-card"><input type="checkbox" defaultChecked /><span><b>Allow partial group check-in</b><small>Door staff select the people who are physically present.</small></span></label></>}
         {step === 5 && <><span className="eyebrow">Step 5 of {stepCount}</span><h1>Ready when you are.</h1><p>Review the important details. Publishing creates your shareable event page.</p><div className="publish-checklist"><div><span><Sparkles size={18} /></span><p><b>Event page</b><small>{title} · Page design complete</small></p><Check size={18} /></div><div><span>{visibility === "public" ? <Globe2 size={18} /> : <Lock size={18} />}</span><p><b>Visibility</b><small>{visibility === "public" ? "Public and discoverable" : "Private invitation link"}</small></p><Check size={18} /></div><div><span><Armchair size={18} /></span><p><b>{admissionOptions.find((item) => item.id === admissionMode)?.title}</b><small>{pricingMode === "paid" ? "Paid in NGN · Mixed price bands enabled" : "All places are free"}</small></p><Check size={18} /></div><div><span><Eye size={18} /></span><p><b>Group booking and QR</b><small>All attendee names required · Partial arrival enabled</small></p><Check size={18} /></div></div><div className="publish-note"><Globe2 size={17} /><span><b>Your event link</b><small>nasaevent.demo/events/lumina-gala</small></span></div></>}
         <div className="wizard-actions"><button className="button button--quiet" type="button" onClick={back} disabled={step === 1}><ArrowLeft size={16} /> Back</button>{step < stepCount ? <button className="button button--brand button--large" type="button" onClick={next}>Continue <ArrowRight size={16} /></button> : <button className="button button--brand button--large" type="button" onClick={publish}>{published ? "Publishing..." : <>Publish event <Sparkles size={16} /></>}</button>}</div>
       </section>
-      {step !== 3 && <aside className="wizard-preview"><div className="wizard-preview__bar"><span>Live event page preview</span><button type="button">Open full preview <Eye size={13} /></button></div><div className="wizard-phone"><div className="wizard-phone__art" style={{ background: accent }}><small>YOU&apos;RE INVITED</small><h2>{title || "Your event name"}</h2><span>24 · 08 · 26</span></div><div className="wizard-phone__body"><small>{visibility === "public" ? "PUBLIC EVENT" : "PRIVATE INVITATION"}</small><h3>Save the date</h3><p>Monday, 24 August · 6:00 PM</p><button style={{ background: accent }}>{step >= 3 && admissionMode === "selectable" ? "Choose seats" : "RSVP now"}</button></div></div></aside>}
+      {step !== 2 && step !== 3 && <aside className="wizard-preview"><div className="wizard-preview__bar"><span>Live event page preview</span><button type="button">Open full preview <Eye size={13} /></button></div><div className="wizard-phone"><div className="wizard-phone__art" style={{ background: accent }}><small>YOU&apos;RE INVITED</small><h2>{title || "Your event name"}</h2><span>24 · 08 · 26</span></div><div className="wizard-phone__body"><small>{visibility === "public" ? "PUBLIC EVENT" : "PRIVATE INVITATION"}</small><h3>Save the date</h3><p>Monday, 24 August · 6:00 PM</p><button style={{ background: accent }}>{step >= 3 && admissionMode === "selectable" ? "Choose seats" : "RSVP now"}</button></div></div></aside>}
     </div>
+    {questionModalOpen && <QuestionModal draft={questionDraft} onChange={setQuestionDraft} onClose={() => setQuestionModalOpen(false)} onSave={saveQuestion} />}
   </div>;
+}
+
+function questionTypeLabel(type: QuestionType) {
+  return questionTypes.find((item) => item.id === type)?.label ?? "Question";
+}
+
+function questionScopeLabel(scope: QuestionScope) {
+  if (scope === "buyer") return "Buyer only";
+  if (scope === "each_attendee") return "Every attendee";
+  return "Whole booking";
+}
+
+function QuestionModal({ draft, onChange, onClose, onSave }: { draft: CustomQuestion; onChange: (draft: CustomQuestion) => void; onClose: () => void; onSave: (draft: CustomQuestion) => void }) {
+  const selectedType = questionTypes.find((type) => type.id === draft.type) ?? questionTypes[0];
+  const validOptions = draft.options.map((option) => option.trim()).filter(Boolean);
+  const canSave = draft.label.trim().length > 0 && (!selectedType.needsOptions || validOptions.length >= 2);
+
+  function update(patch: Partial<CustomQuestion>) {
+    onChange({ ...draft, ...patch });
+  }
+
+  function updateOption(index: number, value: string) {
+    update({ options: draft.options.map((option, optionIndex) => optionIndex === index ? value : option) });
+  }
+
+  function addOption() {
+    update({ options: [...draft.options, `Option ${draft.options.length + 1}`] });
+  }
+
+  function removeOption(index: number) {
+    update({ options: draft.options.filter((_, optionIndex) => optionIndex !== index) });
+  }
+
+  return <div className="question-modal" role="dialog" aria-modal="true" aria-labelledby="question-modal-title"><form onSubmit={(event) => { event.preventDefault(); if (canSave) onSave(draft); }}><header><div><span className="dashboard-eyebrow">Custom registration question</span><h2 id="question-modal-title">{draft.label ? "Edit question" : "Create a new question"}</h2><p>Build anything from simple text fields to choices, consent, file upload requests, and attendee-level questions.</p></div><button type="button" onClick={onClose} aria-label="Close question builder"><X size={20} /></button></header><div className="question-modal-grid"><label className="field field--full"><span>Question text</span><input autoFocus value={draft.label} onChange={(event) => update({ label: event.target.value })} placeholder="e.g. Do you have any accessibility needs?" /></label><label className="field"><span>Question type</span><select value={draft.type} onChange={(event) => update({ type: event.target.value as QuestionType })}>{questionTypes.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}</select></label><label className="field"><span>Ask this for</span><select value={draft.scope} onChange={(event) => update({ scope: event.target.value as QuestionScope })}><option value="each_attendee">Every attendee</option><option value="buyer">Buyer only</option><option value="booking">Whole booking</option></select></label><label className="field field--full"><span>Placeholder or example answer</span><input value={draft.placeholder} onChange={(event) => update({ placeholder: event.target.value })} placeholder="Optional hint shown inside the field" /></label><label className="field field--full"><span>Help text</span><textarea value={draft.helpText} onChange={(event) => update({ helpText: event.target.value })} placeholder="Optional guidance shown under the question" /></label>{selectedType.supportsRange && <div className="question-range"><label className="field"><span>{draft.type === "rating" ? "Lowest rating" : "Minimum value"}</span><input value={draft.min} onChange={(event) => update({ min: event.target.value })} placeholder={draft.type === "rating" ? "1" : "Optional"} /></label><label className="field"><span>{draft.type === "rating" ? "Highest rating" : "Maximum value"}</span><input value={draft.max} onChange={(event) => update({ max: event.target.value })} placeholder={draft.type === "rating" ? "5" : "Optional"} /></label></div>}{selectedType.needsOptions && <section className="question-options"><div><span>Answer options</span><button type="button" onClick={addOption}><Plus size={15} /> Add option</button></div>{draft.options.map((option, index) => <label key={index}><input value={option} onChange={(event) => updateOption(index, event.target.value)} placeholder={`Option ${index + 1}`} /><button type="button" onClick={() => removeOption(index)} disabled={draft.options.length <= 2} aria-label={`Remove option ${index + 1}`}><Trash2 size={15} /></button></label>)}<small>Choice questions need at least two options.</small></section>}<label className="switch-card question-required"><input type="checkbox" checked={draft.required} onChange={(event) => update({ required: event.target.checked })} /><span><b>Require an answer</b><small>Guests cannot confirm their booking until this question is answered.</small></span></label></div><footer><button className="button button--quiet" type="button" onClick={onClose}>Cancel</button><button className="button button--brand" type="submit" disabled={!canSave}>Save question</button></footer></form></div>;
+}
+
+function TicketCategoryEditor({ categories, pricingMode, onChange }: { categories: TicketCategory[]; pricingMode: PricingMode; onChange: (categories: TicketCategory[]) => void }) {
+  const totalInventory = categories.reduce((sum, category) => sum + category.quantityAvailable, 0);
+  const projectedRevenue = categories.reduce((sum, category) => sum + category.quantityAvailable * (pricingMode === "free" ? 0 : category.price), 0);
+
+  function update(id: string, patch: Partial<TicketCategory>) {
+    onChange(categories.map((category) => category.id === id ? { ...category, ...patch } : category));
+  }
+
+  function addCategory() {
+    onChange([...categories, { id: `ticket-${Date.now()}`, name: `Category ${categories.length + 1}`, description: "General event admission", price: 0, quantityAvailable: 100, color: "#078b9a" }]);
+  }
+
+  function removeCategory(id: string) {
+    if (categories.length <= 1) return;
+    onChange(categories.filter((category) => category.id !== id));
+  }
+
+  return <section className="ticket-category-builder"><header><div><span className="dashboard-eyebrow">General admission inventory</span><h2>Create ticket categories</h2><p>Guests buy a category and quantity. No seats are selected.</p></div><button type="button" className="button button--brand button--small" onClick={addCategory}><Plus size={14} /> Add category</button></header><div className="ticket-category-metrics"><div><small>Categories</small><b>{categories.length}</b></div><div><small>Total available</small><b>{totalInventory}</b></div><div><small>Potential sales</small><b>{pricingMode === "free" ? "Free event" : new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", maximumFractionDigits: 0, notation: "compact" }).format(projectedRevenue)}</b></div></div><div className="ticket-category-list"><div className="ticket-category-labels"><span>Category</span><span>Description</span><span>Price</span><span>Quantity available</span><span /></div>{categories.map((category) => <article key={category.id}><label className="ticket-category-name"><input type="color" value={category.color} onChange={(event) => update(category.id, { color: event.target.value })} aria-label={`${category.name} colour`} /><input value={category.name} onChange={(event) => update(category.id, { name: event.target.value })} aria-label="Category name" /></label><label><input value={category.description} onChange={(event) => update(category.id, { description: event.target.value })} aria-label={`${category.name} description`} /></label><label className="ticket-category-price"><span>₦</span><input type="number" min="0" step="500" value={pricingMode === "free" ? 0 : category.price} disabled={pricingMode === "free"} onChange={(event) => update(category.id, { price: Math.max(0, Number(event.target.value)) })} aria-label={`${category.name} price`} /></label><label><input type="number" min="1" value={category.quantityAvailable} onChange={(event) => update(category.id, { quantityAvailable: Math.max(1, Number(event.target.value)) })} aria-label={`${category.name} quantity available`} /></label><button type="button" onClick={() => removeCategory(category.id)} disabled={categories.length <= 1} title={`Delete ${category.name}`}><Trash2 size={15} /></button></article>)}</div><footer><UsersRound size={17} /><span><b>{totalInventory} tickets available across {categories.length} categories</b><small>Every buyer will still enter the name of each person in their order.</small></span></footer></section>;
 }

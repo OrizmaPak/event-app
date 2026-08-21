@@ -6,6 +6,11 @@ import type {
   TableRecord,
   TeamMember,
 } from "./types";
+import { eventPageConfigs } from "./event-page-data";
+
+function galleryArt(label: string, primary: string, secondary: string) {
+  return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${primary}"/><stop offset="1" stop-color="${secondary}"/></linearGradient><pattern id="p" width="80" height="80" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="4" fill="rgba(255,255,255,.2)"/><circle cx="58" cy="42" r="3" fill="rgba(255,255,255,.14)"/></pattern></defs><rect width="1200" height="800" fill="url(#g)"/><rect width="1200" height="800" fill="url(#p)"/><circle cx="920" cy="120" r="210" fill="rgba(255,255,255,.14)"/><circle cx="210" cy="650" r="260" fill="rgba(0,0,0,.16)"/><rect x="100" y="470" width="1000" height="110" rx="55" fill="rgba(255,255,255,.18)"/><rect x="185" y="360" width="830" height="74" rx="37" fill="rgba(255,255,255,.12)"/><text x="100" y="685" fill="white" font-family="Arial, sans-serif" font-size="74" font-weight="700" letter-spacing="4">${label}</text></svg>`)}`;
+}
 
 export const organizers: Organizer[] = [
   {
@@ -24,6 +29,11 @@ export const organizers: Organizer[] = [
     guestsWelcomed: 12400,
     rating: 4.9,
     verified: true,
+    gallery: [
+      { id: "vv-gallery-1", src: galleryArt("GALA ROOM", "#7557ff", "#17131f"), title: "Gala room styling", caption: "Candlelit tables and soft production lighting." },
+      { id: "vv-gallery-2", src: galleryArt("RECEPTION", "#d28a28", "#3c2376"), title: "Outdoor reception", caption: "Arrival moments designed for warm evenings." },
+      { id: "vv-gallery-3", src: galleryArt("DETAILS", "#ff746d", "#17131f"), title: "Dinner details", caption: "Tablescapes, florals, and personal guest touches." },
+    ],
   },
   {
     id: "org_northstar",
@@ -41,6 +51,11 @@ export const organizers: Organizer[] = [
     guestsWelcomed: 6800,
     rating: 4.8,
     verified: true,
+    gallery: [
+      { id: "nc-gallery-1", src: galleryArt("SUMMIT", "#078b9a", "#17131f"), title: "Founder summit", caption: "Focused programming for founders and operators." },
+      { id: "nc-gallery-2", src: galleryArt("WORKSHOP", "#44c7a2", "#0c3f48"), title: "Workshop session", caption: "Smaller rooms for practical conversations." },
+      { id: "nc-gallery-3", src: galleryArt("STAGE", "#7557ff", "#078b9a"), title: "Main stage", caption: "Simple stage design for useful talks." },
+    ],
   },
   {
     id: "org_canvas",
@@ -58,6 +73,11 @@ export const organizers: Organizer[] = [
     guestsWelcomed: 9100,
     rating: 4.7,
     verified: true,
+    gallery: [
+      { id: "oc-gallery-1", src: galleryArt("OPENING", "#e05270", "#17131f"), title: "Gallery opening", caption: "Installations set up for discovery." },
+      { id: "oc-gallery-2", src: galleryArt("PROJECTION", "#100d17", "#7557ff"), title: "Projection room", caption: "Light and sound for immersive programming." },
+      { id: "oc-gallery-3", src: galleryArt("COURTYARD", "#f1b957", "#e05270"), title: "Courtyard gathering", caption: "Culture, music, and conversation after dark." },
+    ],
   },
 ];
 
@@ -87,7 +107,11 @@ export const events: EventRecord[] = [
     accent: "#7557ff",
     tableCount: 48,
     responseRate: 77,
+    pricingMode: "paid",
+    admissionMode: "selectable",
+    currency: "NGN",
     featured: true,
+    eventPage: eventPageConfigs["lumina-gala"],
   },
   {
     id: "evt_founders",
@@ -114,6 +138,10 @@ export const events: EventRecord[] = [
     accent: "#078b9a",
     tableCount: 20,
     responseRate: 73,
+    pricingMode: "paid",
+    admissionMode: "assigned",
+    currency: "NGN",
+    eventPage: eventPageConfigs["founders-connect-lagos"],
   },
   {
     id: "evt_art",
@@ -140,6 +168,10 @@ export const events: EventRecord[] = [
     accent: "#e05270",
     tableCount: 0,
     responseRate: 66,
+    pricingMode: "free",
+    admissionMode: "general",
+    currency: "NGN",
+    eventPage: eventPageConfigs["night-of-living-art"],
   },
   {
     id: "evt_table",
@@ -162,10 +194,45 @@ export const events: EventRecord[] = [
     checkedIn: 0,
     status: "draft",
     visibility: "private",
+    privateListing: "unlisted",
     cover: "gold",
     accent: "#d28a28",
     tableCount: 8,
     responseRate: 51,
+    pricingMode: "paid",
+    admissionMode: "general",
+    currency: "NGN",
+  },
+  {
+    id: "evt_wedding",
+    slug: "ade-and-zara",
+    organizerId: "org_velvet",
+    title: "Ade & Zara",
+    shortTitle: "Ade + Zara",
+    eyebrow: "Two families, one joyful beginning",
+    description: "Join Ade and Zara for two days of family, tradition and celebration.",
+    longDescription: "A wedding weekend created around love, heritage, good food and everyone who helped bring us here.",
+    dateISO: "2026-12-12T10:00:00+01:00",
+    dateLabel: "Saturday, 12 December 2026",
+    timeLabel: "10:00 AM – 10:00 PM",
+    venue: "The Garden Pavilion",
+    address: "Victoria Island",
+    city: "Lagos",
+    category: "Wedding",
+    capacity: 240,
+    confirmed: 164,
+    checkedIn: 0,
+    status: "published",
+    visibility: "private",
+    privateListing: "listed",
+    cover: "gold",
+    accent: "#6f7d3c",
+    tableCount: 24,
+    responseRate: 68,
+    pricingMode: "free",
+    admissionMode: "assigned",
+    currency: "NGN",
+    eventPage: eventPageConfigs["ade-and-zara"],
   },
 ];
 

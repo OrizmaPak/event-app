@@ -12,6 +12,107 @@ export type PricingMode = "free" | "paid";
 export type AdmissionMode = "general" | "assigned" | "selectable";
 export type LayoutObjectType = "round-table" | "rectangle-table" | "row" | "seat" | "stage" | "aisle" | "label";
 export type SeatStatus = "available" | "held" | "booked" | "reserved" | "blocked" | "unavailable";
+export type EventPageTemplate = "wedding" | "show" | "business" | "celebration";
+export type EventPageShell = "platform" | "microsite";
+export type EventPageAccessMode = "public" | "private-listed" | "private-unlisted";
+export type EventPageSectionType = "hero" | "story" | "schedule" | "people" | "highlights" | "venue" | "travel" | "gallery" | "sponsors" | "registry" | "faq" | "contact" | "cta";
+
+export interface EventMedia {
+  id: string;
+  src: string;
+  alt: string;
+  type?: "image" | "video";
+  caption?: string;
+}
+
+export interface EventScheduleItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  description: string;
+  startISO: string;
+  endISO: string;
+  venue: string;
+  address: string;
+  directionsUrl?: string;
+}
+
+export interface EventPerson {
+  id: string;
+  name: string;
+  role: string;
+  bio?: string;
+  image?: EventMedia;
+}
+
+export interface EventFAQ {
+  id: string;
+  question: string;
+  answer: string;
+}
+
+export interface TravelRecommendation {
+  id: string;
+  category: "hotel" | "transport" | "parking" | "note";
+  title: string;
+  description: string;
+  url?: string;
+}
+
+export interface GiftMethod {
+  id: string;
+  type: "link" | "bank";
+  label: string;
+  description?: string;
+  url?: string;
+  country?: string;
+  bankName?: string;
+  accountName?: string;
+  accountNumber?: string;
+  currency?: string;
+}
+
+interface EventPageSectionBase {
+  id: string;
+  type: EventPageSectionType;
+  title: string;
+  eyebrow?: string;
+  visible: boolean;
+  tone?: "light" | "tint" | "dark";
+}
+
+export type EventPageSection =
+  | (EventPageSectionBase & { type: "hero"; subtitle: string; media?: EventMedia; countdown: boolean })
+  | (EventPageSectionBase & { type: "story"; body: string[]; media?: EventMedia; quote?: string })
+  | (EventPageSectionBase & { type: "schedule"; items: EventScheduleItem[] })
+  | (EventPageSectionBase & { type: "people"; intro?: string; people: EventPerson[] })
+  | (EventPageSectionBase & { type: "highlights"; items: Array<{ id: string; title: string; description: string }> })
+  | (EventPageSectionBase & { type: "venue"; description: string; venues: Array<{ id: string; name: string; address: string; directionsUrl?: string }> })
+  | (EventPageSectionBase & { type: "travel"; intro: string; items: TravelRecommendation[] })
+  | (EventPageSectionBase & { type: "gallery"; media: EventMedia[] })
+  | (EventPageSectionBase & { type: "sponsors"; intro?: string; names: string[] })
+  | (EventPageSectionBase & { type: "registry"; intro: string; methods: GiftMethod[] })
+  | (EventPageSectionBase & { type: "faq"; intro?: string; items: EventFAQ[] })
+  | (EventPageSectionBase & { type: "contact"; body: string; email?: string; phone?: string })
+  | (EventPageSectionBase & { type: "cta"; body: string; buttonLabel: string });
+
+export interface EventPageConfig {
+  template: EventPageTemplate;
+  shell: EventPageShell;
+  access: { mode: EventPageAccessMode; hint?: string };
+  branding: {
+    logoText: string;
+    accent: string;
+    background: string;
+    surface: string;
+    text: string;
+    typography: "editorial" | "modern" | "bold";
+    buttonStyle: "solid" | "outline";
+  };
+  primaryAction: { type: "native" | "external"; label: string; url?: string };
+  sections: EventPageSection[];
+  seo: { title: string; description: string; image?: string };
+}
 
 export interface Organizer {
   id: string;
@@ -29,6 +130,14 @@ export interface Organizer {
   guestsWelcomed: number;
   rating: number;
   verified: boolean;
+  gallery?: PortfolioGalleryImage[];
+}
+
+export interface PortfolioGalleryImage {
+  id: string;
+  src: string;
+  title: string;
+  caption: string;
 }
 
 export interface EventRecord {
@@ -52,6 +161,7 @@ export interface EventRecord {
   checkedIn: number;
   status: EventStatus;
   visibility: "public" | "private";
+  privateListing?: "listed" | "unlisted";
   cover: "violet" | "coral" | "teal" | "gold";
   accent: string;
   tableCount: number;
@@ -61,12 +171,22 @@ export interface EventRecord {
   admissionMode?: AdmissionMode;
   currency?: string;
   bookingLimit?: number | null;
+  eventPage?: EventPageConfig;
 }
 
 export interface PriceBand {
   id: string;
   name: string;
   price: number;
+  color: string;
+}
+
+export interface TicketCategory {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  quantityAvailable: number;
   color: string;
 }
 
@@ -99,6 +219,8 @@ export interface SeatRecord {
 export interface BookingAttendee {
   id: string;
   name: string;
+  email?: string;
+  phone?: string;
   seatId?: string;
   seatLabel?: string;
   priceBandName: string;

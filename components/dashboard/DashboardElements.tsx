@@ -5,23 +5,19 @@ import { Check, ChevronDown, ExternalLink, Share2 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { events } from "@/lib/data/mock-data";
+import type { EventRecord } from "@/lib/data/types";
 
 export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description?: string; actions?: React.ReactNode }) {
   return <div className="dashboard-page-head"><div>{eyebrow && <span className="dashboard-eyebrow">{eyebrow}</span>}<h1>{title}</h1>{description && <p>{description}</p>}</div>{actions && <div className="dashboard-page-head__actions">{actions}</div>}</div>;
 }
 
-const tabs = [
-  ["Overview", "/organizer/events/lumina-gala"],
-  ["Guests", "/organizer/events/lumina-gala/guests"],
-  ["Seating", "/organizer/events/lumina-gala/seating"],
-  ["Messages", "/organizer/events/lumina-gala/messages"],
-  ["Check-in", "/organizer/events/lumina-gala/check-in"],
-  ["Analytics", "/organizer/events/lumina-gala/analytics"],
-];
-
-export function EventManagementHeader() {
+export function EventManagementHeader({ event: eventProp }: { event?: EventRecord } = {}) {
   const pathname = usePathname();
-  return <section className="event-management-head"><div className="event-management-head__top"><div className="event-mini-cover"><i /><span>LUMINA</span></div><div><span className="dashboard-eyebrow">Celebration · Published</span><h1>The Lumina Gala 2026</h1><p>24 August · 6:00 PM · The Monarch, Lagos</p></div><div className="event-management-head__actions"><Link className="button button--outline button--small" href="/events/lumina-gala" target="_blank">Preview <ExternalLink size={14} /></Link><MockButton label="Share event" icon={<Share2 size={14} />} /></div></div><nav className="event-tabs" aria-label="Event management sections">{tabs.map(([label, href]) => <Link key={href} className={pathname === href ? "active" : ""} href={href}>{label}</Link>)}</nav></section>;
+  const routeSlug = pathname.match(/\/organizer\/events\/([^/]+)/)?.[1];
+  const event = eventProp ?? events.find((item) => item.slug === routeSlug) ?? events[0];
+  const base = `/organizer/events/${event.slug}`;
+  const tabs = [["Overview", base], ["Page design", `${base}/page-design`], [event.visibility === "private" ? "Invitations" : "Guests", `${base}/guests`], ...(event.slug === "lumina-gala" ? [["Seating", `${base}/seating`], ["Messages", `${base}/messages`], ["Check-in", `${base}/check-in`], ["Analytics", `${base}/analytics`]] : [])];
+  return <section className="event-management-head"><div className="event-management-head__top"><div className={`event-mini-cover event-mini-cover--${event.cover}`}><i /><span>{event.shortTitle.slice(0, 10).toUpperCase()}</span></div><div><span className="dashboard-eyebrow">{event.category} · {event.status}</span><h1>{event.title}</h1><p>{event.dateLabel.replace(/^\w+, /, "")} · {event.timeLabel.split(" – ")[0]} · {event.venue}</p></div><div className="event-management-head__actions"><Link className="button button--outline button--small" href={`/events/${event.slug}`} target="_blank">Preview <ExternalLink size={14} /></Link><MockButton label="Share event" icon={<Share2 size={14} />} /></div></div><nav className="event-tabs" aria-label="Event management sections">{tabs.map(([label, href]) => <Link key={href} className={pathname === href ? "active" : ""} href={href}>{label}</Link>)}</nav></section>;
 }
 
 export function MockButton({ label, success = "Done", icon, className = "button button--outline button--small" }: { label: string; success?: string; icon?: React.ReactNode; className?: string }) {

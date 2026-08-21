@@ -1,0 +1,18 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+interface RegistrationQuestion { id: string; label: string; type: string; scope: "buyer" | "booking" | "each_attendee"; required: boolean; placeholder?: string | null; helpText?: string | null; options: string[] }
+
+export function DynamicRegistrationFields({ eventSlug, attendeeKeys, onValidityChange }: { eventSlug: string; attendeeKeys: string[]; onValidityChange: (valid: boolean) => void }) {
+  const [questions, setQuestions] = useState<RegistrationQuestion[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string | string[] | boolean>>({});
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => { let active = true; fetch(`/api/events/${eventSlug}/questions`).then((response) => response.json()).then((payload: any) => { if (active) setQuestions(payload.data ?? []); }).finally(() => { if (active) setLoaded(true); }); return () => { active = false; }; }, [eventSlug]);
+  const fields = useMemo(() => questions.flatMap((question) => question.scope === "each_attendee" ? attendeeKeys.map((key, index) => ({ question, key: `${question.id}:${key}`, attendeeLabel: `Attendee ${index + 1}` })) : [{ question, key: question.id, attendeeLabel: "" }]), [questions, attendeeKeys]);
+  const valid = loaded && fields.every(({ question, key }) => !question.required || (Array.isArray(answers[key]) ? (answers[key] as string[]).length > 0 : Boolean(answers[key])));
+  useEffect(() => { onValidityChange(valid); }, [valid, onValidityChange]);
+  if (!loaded || fields.length === 0) return null;
+  function update(key: string, value: string | string[] | boolean) { setAnswers((current) => ({ ...current, [key]: value })); }
+  return <section className="dynamic-registration-fields"><header><small>EVENT QUESTIONS</small><h2>A few details for the host</h2><p>Questions are configured for this event and may apply to the buyer, booking or each attendee.</p></header>{fields.map(({ question, key, attendeeLabel }) => <label className="field" key={key}><span>{question.label}{attendeeLabel && <small> · {attendeeLabel}</small>}{question.required && <em>Required</em>}</span>{question.type === "long_text" ? <textarea value={String(answers[key] ?? "")} onChange={(event) => update(key, event.target.value)} placeholder={question.placeholder ?? ""} /> : question.type === "single_choice" ? <select value={String(answers[key] ?? "")} onChange={(event) => update(key, event.target.value)}><option value="">Choose an option</option>{question.options.map((option) => <option key={option}>{option}</option>)}</select> : question.type === "multi_choice" ? <span className="dynamic-question-options">{question.options.map((option) => { const selected = (answers[key] as string[] | undefined) ?? []; return <span key={option}><input type="checkbox" checked={selected.includes(option)} onChange={(event) => update(key, event.target.checked ? [...selected, option] : selected.filter((value) => value !== option))} />{option}</span>; })}</span> : question.type === "consent" || question.type === "checkbox" ? <span className="dynamic-question-check"><input type="checkbox" checked={Boolean(answers[key])} onChange={(event) => update(key, event.target.checked)} /> Yes, I agree</span> : <input type={question.type === "number" ? "number" : question.type === "date" ? "date" : question.type === "time" ? "time" : question.type === "email" ? "email" : question.type === "phone" ? "tel" : "text"} value={String(answers[key] ?? "")} onChange={(event) => update(key, event.target.value)} placeholder={question.placeholder ?? ""} />}{question.helpText && <small>{question.helpText}</small>}</label>)}</section>;
+}

@@ -1,30 +1,34 @@
-const cells = [
-  0,1,2,3,4,5,6,8,10,12,13,14,15,16,17,18,19,20,
-  21,27,29,31,35,39,42,44,46,48,50,52,54,56,58,60,
-  63,64,65,66,67,68,69,72,74,76,78,80,82,84,85,86,
-  87,88,89,90,92,94,96,98,100,102,104,106,108,110,
-  112,114,116,118,120,122,124,126,128,130,132,134,
-  136,138,140,142,144,146,148,150,152,154,156,158,
-  160,162,164,166,168,170,172,174,176,178,180,182,
-  184,186,188,190,192,194,196,198,200,202,204,206,
-  208,210,212,214,216,218,220,222,224,226,228,230,
-  232,234,236,238,240,242,244,246,248,250,252,254,
-  256,258,260,262,264,266,268,270,272,274,276,278,
-  280,282,284,286,288,290,292,294,296,298,300,302,
-  304,306,308,310,312,314,316,318,320,322,324,326,
-  328,330,332,334,336,338,340,342,344,346,348,350,
-  352,354,356,358,360,362,364,366,368,370,372,374,
-  376,378,380,382,384,386,388,390,392,394,396,398,
-  400,402,404,406,408,410,412,414,416,418,420,422,
-  424,426,428,430,432,434,436,438,440
+const matrixSize = 29;
+const finderOrigins = [
+  [0, 0],
+  [matrixSize - 7, 0],
+  [0, matrixSize - 7],
 ];
+
+function inFinder(row: number, column: number) {
+  return finderOrigins.some(([x, y]) => column >= x && column < x + 7 && row >= y && row < y + 7);
+}
+
+function isFilled(row: number, column: number) {
+  if (inFinder(row, column)) return false;
+  if (row === 8 || column === 8) return (row + column) % 2 === 0;
+  return ((row * 17 + column * 31 + row * column) % 7 < 3) || ((row + column * 3) % 11 === 0);
+}
 
 export function DemoQr({ size = 132 }: { size?: number }) {
   return (
-    <div className="demo-qr" style={{ width: size, height: size }} role="img" aria-label="Demo QR event pass">
-      {Array.from({ length: 441 }).map((_, index) => (
-        <i key={index} className={cells.includes(index) || (index * 7 + index % 5) % 11 < 3 ? "filled" : ""} />
+    <svg className="demo-qr demo-qr--svg" style={{ width: size, height: size }} viewBox="-.75 -.75 30.5 30.5" role="img" aria-label="Demo QR event pass">
+      <rect x="-.75" y="-.75" width="30.5" height="30.5" rx="1.2" fill="#fff" />
+      {finderOrigins.map(([x, y]) => (
+        <g key={`${x}-${y}`}>
+          <rect x={x} y={y} width="7" height="7" rx=".5" fill="#17131f" />
+          <rect x={x + 1} y={y + 1} width="5" height="5" rx=".35" fill="#fff" />
+          <rect x={x + 2} y={y + 2} width="3" height="3" rx=".25" fill="#17131f" />
+        </g>
       ))}
-    </div>
+      {Array.from({ length: matrixSize * matrixSize }).map((_, index) => (
+        isFilled(Math.floor(index / matrixSize), index % matrixSize) ? <rect key={index} x={index % matrixSize} y={Math.floor(index / matrixSize)} width="1" height="1" fill="#17131f" /> : null
+      ))}
+    </svg>
   );
 }
