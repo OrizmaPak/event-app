@@ -1,0 +1,1 @@
+ALTER TABLE "organizers" ADD COLUMN "auto_event_approval" boolean DEFAULT false NOT NULL;

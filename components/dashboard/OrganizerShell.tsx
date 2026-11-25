@@ -13,37 +13,37 @@ import {
   LayoutDashboard,
   LogOut,
   Mail,
+  Landmark,
   Menu,
+  Paintbrush,
   Plus,
   QrCode,
   Search,
   Settings,
+  Store,
   Sparkles,
+  Ticket,
   UsersRound,
   UserRound,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Brand } from "@/components/shared/Brand";
-import { activity, events } from "@/lib/data/mock-data";
+import { activity } from "@/lib/data/mock-data";
+import type { EventRecord } from "@/lib/data/types";
+import { OrganizerPermissionsProvider } from "@/components/dashboard/OrganizerPermissionsContext";
 
 const primary = [
-  ["Overview", "/organizer", LayoutDashboard],
-  ["Events", "/organizer/events", CalendarDays],
-];
-
-const eventLinks = [
-  ["Guests", "/organizer/events/lumina-gala/guests", UsersRound],
-  ["Seating", "/organizer/events/lumina-gala/seating", ContactRound],
-  ["Messages", "/organizer/events/lumina-gala/messages", Mail],
-  ["Check-in setup", "/organizer/events/lumina-gala/check-in", QrCode],
-  ["Analytics", "/organizer/events/lumina-gala/analytics", BarChart3],
+  ["Overview", "/organizer", LayoutDashboard, "workspace.view"],
+  ["Events", "/organizer/events", CalendarDays, "events.view"],
+  ["Resources", "/organizer/resources", Store, "resources.view"],
 ];
 
 const manage = [
-  ["Team", "/organizer/team", UsersRound],
-  ["Public portfolio", "/organizer/portfolio", Sparkles],
-  ["Settings", "/organizer/settings", Settings],
+  ["Finance & refunds", "/organizer/finance", Landmark, "finance.view"],
+  ["Team", "/organizer/team", UsersRound, "team.view"],
+  ["Public portfolio", "/organizer/portfolio", Sparkles, "workspace.manage"],
+  ["Settings", "/organizer/settings", Settings, "workspace.manage"],
 ];
 
 const activityIcons = {
@@ -53,22 +53,33 @@ const activityIcons = {
   team: UsersRound,
 };
 
-type NavItem = [string, string, React.ComponentType<{ size?: number }>];
+type NavItem = [string, string, React.ComponentType<{ size?: number }>, string];
 
-export function OrganizerShell({ children }: { children: React.ReactNode }) {
+export function OrganizerShell({ children, principal, events }: { children: React.ReactNode; principal: { name: string; email: string; role: string; permissions: string[] }; events: EventRecord[] }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [eventMenuOpen, setEventMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const [selectedEventId, setSelectedEventId] = useState(events[0].id);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(events[0]?.id ?? null);
   const [serverNotifications, setServerNotifications] = useState<Array<{ id: string; title: string; body: string; createdAt: string; readAt?: string | null }>>([]);
 
   const selectedEvent = useMemo(
-    () => events.find((event) => event.id === selectedEventId) ?? events[0],
+    () => events.find((event) => event.id === selectedEventId) ?? events[0] ?? null,
     [selectedEventId],
   );
+  const can = (permission: string) => principal.permissions.includes("*") || principal.permissions.includes(permission);
+  const eventLinks: NavItem[] = selectedEvent ? [
+    ["Overview", `/organizer/events/${selectedEvent.slug}`, LayoutDashboard, "events.view"],
+    ["Page design", `/organizer/events/${selectedEvent.slug}/page-design`, Paintbrush, "page.manage"],
+    ["Bookings", `/organizer/events/${selectedEvent.slug}/bookings`, Ticket, "tickets.manage"],
+    ["Guests", `/organizer/events/${selectedEvent.slug}/guests`, UsersRound, "guests.view"],
+    ["Seating", `/organizer/events/${selectedEvent.slug}/seating`, ContactRound, "seating.manage"],
+    ["Messages", `/organizer/events/${selectedEvent.slug}/messages`, Mail, "messages.manage"],
+    ["Check-in setup", `/organizer/events/${selectedEvent.slug}/check-in`, QrCode, "checkin.operate"],
+    ["Analytics", `/organizer/events/${selectedEvent.slug}/analytics`, BarChart3, "analytics.view"],
+  ] : [];
 
   useEffect(() => {
     const storedEventId = window.localStorage.getItem("nasa-selected-event");
@@ -98,9 +109,7 @@ export function OrganizerShell({ children }: { children: React.ReactNode }) {
   }
 
   function logout() {
-    window.localStorage.removeItem("nasa-organizer-session");
-    void fetch("/api/auth/demo", { method: "DELETE" });
-    window.location.href = "/organizer/login";
+    void fetch("/api/v1/auth/logout", { method: "POST" }).finally(() => { window.location.href = "/organizer/login"; });
   }
 
   function chooseEvent(eventId: string) {
@@ -117,7 +126,7 @@ export function OrganizerShell({ children }: { children: React.ReactNode }) {
   }
 
   const renderItems = (items: NavItem[]) =>
-    items.map(([label, href, Icon]) => (
+    items.filter(([, , , permission]) => can(permission) || (permission === "resources.view" && can("resources.manage"))).map(([label, href, Icon]) => (
       <Link
         key={href}
         className={active(href) ? "active" : ""}
@@ -140,15 +149,15 @@ export function OrganizerShell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
-        <Link className="button button--brand dashboard-create" href="/organizer/events/new">
+        {can("events.create") && <Link className="button button--brand dashboard-create" href="/organizer/events/new">
           <Plus size={16} /> Create new event
-        </Link>
+        </Link>}
 
         <nav className="dashboard-nav" aria-label="Organizer navigation">
           <small>Workspace</small>
           {renderItems(primary as NavItem[])}
 
-          <div className="event-switcher-wrap">
+          {selectedEvent && <div className="event-switcher-wrap">
             <button
               className="event-switcher"
               type="button"
@@ -191,9 +200,9 @@ export function OrganizerShell({ children }: { children: React.ReactNode }) {
                 ))}
               </div>
             )}
-          </div>
+          </div>}
 
-          {renderItems(eventLinks as NavItem[])}
+          {renderItems(eventLinks)}
           <small>Manage</small>
           {renderItems(manage as NavItem[])}
         </nav>
@@ -281,16 +290,16 @@ export function OrganizerShell({ children }: { children: React.ReactNode }) {
                 aria-expanded={accountMenuOpen}
                 onClick={() => setAccountMenuOpen(!accountMenuOpen)}
               >
-                <span>JO</span>
-                <div><b>John Oreva</b><small>Workspace owner</small></div>
+                <span>{principal.name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span>
+                <div><b>{principal.name}</b><small>{principal.role.replaceAll("_", " ")}</small></div>
                 <ChevronDown size={15} />
               </button>
 
               {accountMenuOpen && (
                 <div className="profile-dropdown" role="menu" aria-label="Account menu">
                   <header>
-                    <span>JO</span>
-                    <p><b>John Oreva</b><small>john@nasaevent.demo</small></p>
+                    <span>{principal.name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span>
+                    <p><b>{principal.name}</b><small>{principal.email}</small></p>
                   </header>
                   <Link href="/organizer/portfolio" role="menuitem" onClick={() => setAccountMenuOpen(false)}><UserRound size={17} /> Profile</Link>
                   <Link href="/organizer/settings" role="menuitem" onClick={() => setAccountMenuOpen(false)}><Settings size={17} /> Settings</Link>
@@ -311,7 +320,7 @@ export function OrganizerShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        <main className="dashboard-content">{children}</main>
+        <main className="dashboard-content"><OrganizerPermissionsProvider permissions={principal.permissions}>{children}</OrganizerPermissionsProvider></main>
       </div>
 
       {mobileOpen && <button className="dashboard-backdrop" aria-label="Close menu" onClick={() => setMobileOpen(false)} />}

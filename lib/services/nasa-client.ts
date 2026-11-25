@@ -1,6 +1,7 @@
 import { events, guests, organizers, tables, team } from "@/lib/data/mock-data";
 import type { EventRecord, Guest, Organizer, TableRecord, TeamMember } from "@/lib/data/types";
 import { getDatabaseEvent, listDatabaseDiscoveryEvents } from "@/lib/db/events";
+import { getDatabaseOrganizer, listDatabaseOrganizers } from "@/lib/db/organizers";
 
 export interface NasaEventClient {
   listPublishedEvents(): Promise<EventRecord[]>;
@@ -19,20 +20,26 @@ export interface NasaEventClient {
 export const nasaClient: NasaEventClient = {
   async listPublishedEvents() {
     if (process.env.DATABASE_URL) {
-      try { return await listDatabaseDiscoveryEvents(); } catch (error) { console.warn("Database event listing unavailable; using demo records.", error); }
+      return listDatabaseDiscoveryEvents();
     }
     return events.filter((event) => event.status === "published" && (event.visibility === "public" || event.privateListing === "listed"));
   },
   async getEvent(slug) {
     if (process.env.DATABASE_URL) {
-      try { return await getDatabaseEvent(slug); } catch (error) { console.warn("Database event lookup unavailable; using demo records.", error); }
+      return getDatabaseEvent(slug);
     }
     return events.find((event) => event.slug === slug) ?? null;
   },
   async listOrganizers() {
+    if (process.env.DATABASE_URL) {
+      return listDatabaseOrganizers();
+    }
     return organizers;
   },
   async getOrganizer(slug) {
+    if (process.env.DATABASE_URL) {
+      return getDatabaseOrganizer(slug);
+    }
     return organizers.find((organizer) => organizer.slug === slug) ?? null;
   },
   async listGuests(eventId) {

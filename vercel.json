@@ -1,5 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "buildCommand": "npx next build"
+  "buildCommand": "npx next build",
+  "crons": [
+    { "path": "/api/v1/internal/maintenance", "schedule": "*/5 * * * *" },
+    { "path": "/api/v1/internal/deliveries", "schedule": "*/2 * * * *" },
+    { "path": "/api/v1/internal/jobs", "schedule": "*/5 * * * *" }
+  ]
 }

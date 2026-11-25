@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy, KeyRound, Mail, Plus, RefreshCw, Search, Send, ShieldOff, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 interface InvitationRecord { id: string; guestName: string; email: string; phone?: string | null; partyAllowance: number; personalization: Record<string, unknown>; status: string; deliveryStatus: string; lastSentAt?: string | null; createdAt: string; revokedAt?: string | null }
 
@@ -16,8 +16,8 @@ export function InvitationManager({ eventSlug, eventTitle }: { eventSlug: string
   const [customFields, setCustomFields] = useState([{ id: "detail-1", label: "Invitation note", value: "We have reserved a place especially for you." }]);
   const results = useMemo(() => invitations.filter((item) => `${item.guestName} ${item.email}`.toLowerCase().includes(query.toLowerCase())), [invitations, query]);
 
-  async function load() { const response = await fetch(`/api/organizer/events/${eventSlug}/invitations`); const payload: any = await response.json(); if (response.ok) setInvitations(payload.data); else setError(payload.error?.message ?? "Unable to load invitations."); }
-  useEffect(() => { void load(); }, [eventSlug]);
+  const load = useCallback(async () => { const response = await fetch(`/api/organizer/events/${eventSlug}/invitations`); const payload: any = await response.json(); if (response.ok) setInvitations(payload.data); else setError(payload.error?.message ?? "Unable to load invitations."); }, [eventSlug]);
+  useEffect(() => { void load(); }, [load]);
   function feedback(message: string) { setNotice(message); window.setTimeout(() => setNotice(""), 2600); }
 
   async function create(event: React.FormEvent<HTMLFormElement>) {

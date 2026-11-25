@@ -1,4 +1,4 @@
 import type { Metadata } from "next";
-import { RegisterForm } from "@/components/dashboard/AuthForms";
-export const metadata: Metadata = { title: "Create organizer account" };
-export default function RegisterPage() { return <RegisterForm />; }
+import { AccountRegisterForm } from "@/components/dashboard/UserAccountForms";
+export const metadata: Metadata = { title: "Create account" };
+export default function RegisterPage() { return <AccountRegisterForm />; }

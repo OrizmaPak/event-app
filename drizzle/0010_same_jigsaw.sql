@@ -1,0 +1,2 @@
+ALTER TABLE "event_staff_assignments" ADD COLUMN "access_code_hash" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "event_staff_access_code_hash_uidx" ON "event_staff_assignments" USING btree ("access_code_hash") WHERE "event_staff_assignments"."access_code_hash" is not null;

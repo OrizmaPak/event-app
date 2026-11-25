@@ -1,15 +1,25 @@
 "use client";
 
-import { AlertCircle, ArrowLeft, ArrowRight, Armchair, Check, CheckCircle2, Clock3, CreditCard, List, Mail, Map, Minus, PartyPopper, Plus, ShieldCheck, Ticket, UsersRound } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, Armchair, Check, CheckCircle2, Clock3, CreditCard, List, LoaderCircle, Mail, Map as MapIcon, Minus, PartyPopper, Plus, ShieldCheck, Ticket, UsersRound } from "lucide-react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { DynamicRegistrationFields } from "./DynamicRegistrationFields";
 import { events } from "@/lib/data/mock-data";
 import { compactMoney, demoLayoutObjects, demoPriceBands, demoSeats, formatMoney } from "@/lib/data/seating-data";
-import type { AdmissionMode, Booking, PricingMode, TicketCategory } from "@/lib/data/types";
+import type { AdmissionMode, Booking, LayoutObject, LayoutObjectType, PricingMode, TicketCategory } from "@/lib/data/types";
 
 type BuyerData = { name: string; email: string; phone: string };
 type AttendeeDetails = { name: string; email: string; phone: string };
 type ViewMode = "map" | "list";
+type Inventory = {
+  event: { id: string; pricingMode: PricingMode; admissionMode: AdmissionMode; currency: string; bookingLimit: number | null };
+  priceBands: Array<{ id: string; name: string; color: string; priceMinor: number }>;
+  layout: { objects: Array<{ id: string; type: LayoutObjectType; label: string; x: number; y: number; width: number; height: number; rotation: number; seatCount: number }> };
+  seats: Array<{ id: string; layoutObjectId: string; stableKey: string; label: string; shortLabel: string; priceBandId: string | null; priceMinor: number; status: string }>;
+  ticketCategories: Array<{ id: string; name: string; description: string; color: string; priceMinor: number; quantityAvailable: number }>;
+};
+type GuestSeat = { id: string; inventoryId?: string; objectId: string; label: string; shortLabel: string; priceBandId: string; price: number; status: string };
+type BookingAccess = { bookingId: string; managementToken: string };
+type ApiEnvelope<T> = { data: T | null; error: { code: string; message: string } | null };
 
 const initialBuyer: BuyerData = { name: "", email: "", phone: "" };
 const fallbackTicketCategories: TicketCategory[] = [
@@ -69,6 +79,13 @@ function demoEventSettings(eventSlug: string) {
   };
 }
 
+function guestSeatPosition(type: LayoutObjectType, index: number, total: number) {
+  if (type === "row") return { left: `${((index + 0.5) / total) * 100}%`, top: "50%" };
+  if (type === "seat") return { left: "50%", top: "50%" };
+  const angle = ((Math.PI * 2) / total) * index - Math.PI / 2;
+  return { left: `${50 + Math.cos(angle) * 45}%`, top: `${50 + Math.sin(angle) * 45}%` };
+}
+
 export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) {
   const savedSettings = useSyncExternalStore(
     subscribeToEventSettings,
@@ -77,11 +94,15 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
   );
   const initialSettings = useMemo(() => parseEventSettings(savedSettings), [savedSettings]);
   const demoSettings = useMemo(() => demoEventSettings(eventSlug), [eventSlug]);
+  const [inventory, setInventory] = useState<Inventory | null>(null);
+  const [inventoryLoading, setInventoryLoading] = useState(true);
   const [step, setStep] = useState(1);
   const [attending, setAttending] = useState<"yes" | "no">("yes");
-  const admissionMode = eventSlug === "lumina-gala" ? initialSettings.admissionMode : demoSettings.admissionMode;
-  const pricingMode = eventSlug === "lumina-gala" ? initialSettings.pricingMode : demoSettings.pricingMode;
-  const ticketCategories = eventSlug === "lumina-gala" ? initialSettings.ticketCategories : fallbackTicketCategories;
+  const admissionMode = inventory?.event.admissionMode ?? (eventSlug === "lumina-gala" ? initialSettings.admissionMode : demoSettings.admissionMode);
+  const pricingMode = inventory?.event.pricingMode ?? (eventSlug === "lumina-gala" ? initialSettings.pricingMode : demoSettings.pricingMode);
+  const ticketCategories = inventory?.ticketCategories.length
+    ? inventory.ticketCategories.map((category) => ({ ...category, price: category.priceMinor / 100 }))
+    : eventSlug === "lumina-gala" ? initialSettings.ticketCategories : fallbackTicketCategories;
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [quantity, setQuantity] = useState(1);
   const [tierId, setTierId] = useState("band-standard");
@@ -93,6 +114,24 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
   const [paymentState, setPaymentState] = useState<"ready" | "processing" | "declined">("ready");
   const [busy, setBusy] = useState(false);
   const [customQuestionsValid, setCustomQuestionsValid] = useState(true);
+  const [holdToken, setHoldToken] = useState("");
+  const [holdSignature, setHoldSignature] = useState("");
+  const [bookingAccess, setBookingAccess] = useState<BookingAccess | null>(null);
+  const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
+  const [flowError, setFlowError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/v1/public/events/${eventSlug}/inventory`, { credentials: "include" })
+      .then(async (response) => ({ response, body: await response.json() as ApiEnvelope<Inventory> }))
+      .then(({ response, body }) => {
+        if (!active) return;
+        if (response.ok && body.data) setInventory(body.data);
+        setInventoryLoading(false);
+      })
+      .catch(() => { if (active) setInventoryLoading(false); });
+    return () => { active = false; };
+  }, [eventSlug]);
 
   useEffect(() => {
     if (!selectedIds.length || holdSeconds <= 0) return;
@@ -100,23 +139,28 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
     return () => window.clearInterval(timer);
   }, [selectedIds.length, holdSeconds]);
 
-  const selectedSeats = useMemo(() => selectedIds.map((id) => demoSeats.find((seat) => seat.id === id)).filter(Boolean) as typeof demoSeats, [selectedIds]);
+  const activePriceBands = useMemo(() => inventory?.priceBands.length ? inventory.priceBands.map((band) => ({ ...band, price: band.priceMinor / 100 })) : demoPriceBands, [inventory]);
+  const activeLayoutObjects = useMemo<LayoutObject[]>(() => inventory?.layout.objects.length ? inventory.layout.objects.map((object) => ({ ...object, priceBandId: undefined })) : demoLayoutObjects, [inventory]);
+  const activeSeats = useMemo<GuestSeat[]>(() => inventory?.seats.length ? inventory.seats.map((seat) => ({ id: seat.stableKey, inventoryId: seat.id, objectId: seat.layoutObjectId, label: seat.label, shortLabel: seat.shortLabel, priceBandId: seat.priceBandId ?? "", price: seat.priceMinor / 100, status: seat.status })) : demoSeats.map((seat) => ({ ...seat, price: demoPriceBands.find((band) => band.id === seat.priceBandId)?.price ?? 0 })), [inventory]);
+  useEffect(() => { setEnabledBands(activePriceBands.map((band) => band.id)); }, [activePriceBands]);
+  const activeSeatById = useMemo(() => new Map(activeSeats.map((seat) => [seat.id, seat])), [activeSeats]);
+  const selectedSeats = useMemo(() => selectedIds.map((id) => activeSeatById.get(id)).filter(Boolean) as GuestSeat[], [activeSeatById, selectedIds]);
   const placeKeys = admissionMode === "selectable" ? selectedIds : Array.from({ length: quantity }, (_, index) => `place-${index + 1}`);
   const ticketOptions =
-    admissionMode === "general"
+    admissionMode === "general" || Boolean(inventory?.ticketCategories.length)
       ? ticketCategories
-      : demoPriceBands.map((band) => ({
+      : activePriceBands.map((band) => ({
           ...band,
           description: "Seat assigned later",
           quantityAvailable: 500,
         }));
   const selectedTier = ticketOptions.find((tier) => tier.id === tierId) ?? ticketOptions[0];
   const seatPrice = (seatId: string) => {
-    const seat = demoSeats.find((item) => item.id === seatId);
-    return pricingMode === "free" ? 0 : (demoPriceBands.find((band) => band.id === seat?.priceBandId)?.price ?? 0);
+    const seat = activeSeatById.get(seatId);
+    return pricingMode === "free" ? 0 : seat?.price ?? 0;
   };
   const subtotal = pricingMode === "free" ? 0 : admissionMode === "selectable" ? selectedIds.reduce((sum, id) => sum + seatPrice(id), 0) : selectedTier.price * quantity;
-  const fees = subtotal ? Math.round(subtotal * 0.02) : 0;
+  const fees = 0;
   const total = subtotal + fees;
   const allAttendeeDetailsEntered = placeKeys.length > 0 && placeKeys.every((key) => attendeeDetails[key]?.name.trim() && attendeeDetails[key]?.email.trim());
   const totalSteps = pricingMode === "paid" && attending === "yes" ? 5 : 4;
@@ -148,14 +192,44 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
   }
 
   function toggleSeat(id: string) {
-    const seat = demoSeats.find((item) => item.id === id);
+    const seat = activeSeatById.get(id);
     if (!seat || seat.status !== "available" || holdSeconds === 0) return;
     setSelectedIds((ids) => (ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]));
+    setHoldToken("");
+    setHoldSignature("");
     setHoldSeconds(600);
   }
 
   function toggleBand(id: string) {
     setEnabledBands((ids) => (ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]));
+  }
+
+  async function createHold() {
+    if (!inventory || !selectedTier) {
+      setFlowError("Live ticket availability could not be loaded. Refresh the page and try again.");
+      return false;
+    }
+    const signature = admissionMode === "selectable" ? [...selectedIds].sort().join(",") : `${selectedTier.id}:${quantity}`;
+    if (holdToken && holdSignature === signature && holdSeconds > 0) return true;
+    setBusy(true);
+    setFlowError("");
+    const body = admissionMode === "selectable"
+      ? { seatIds: selectedIds.map((key) => activeSeatById.get(key)?.inventoryId).filter((id): id is string => Boolean(id)), tickets: [] }
+      : { seatIds: [], tickets: [{ ticketCategoryId: selectedTier.id, quantity }] };
+    try {
+      const response = await fetch(`/api/v1/public/events/${eventSlug}/holds`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as ApiEnvelope<{ holdToken: string; expiresAt: string }>;
+      if (!response.ok || !result.data) throw new Error(result.error?.message ?? "Your selection could not be held.");
+      setHoldToken(result.data.holdToken);
+      setHoldSignature(signature);
+      setHoldSeconds(Math.max(0, Math.floor((new Date(result.data.expiresAt).getTime() - Date.now()) / 1000)));
+      return true;
+    } catch (error) {
+      setFlowError(error instanceof Error ? error.message : "Your selection could not be held.");
+      return false;
+    } finally {
+      setBusy(false);
+    }
   }
 
   function finishDecline() {
@@ -167,8 +241,8 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
 
   function buildBooking(paymentStatus: Booking["paymentStatus"]): Booking {
     const attendees = placeKeys.map((key, index) => {
-      const seat = admissionMode === "selectable" ? demoSeats.find((item) => item.id === key) : undefined;
-      const band = seat ? demoPriceBands.find((item) => item.id === seat.priceBandId)! : selectedTier;
+      const seat = admissionMode === "selectable" ? activeSeatById.get(key) : undefined;
+      const band = seat ? activePriceBands.find((item) => item.id === seat.priceBandId)! : selectedTier;
       return {
         id: `attendee-${index + 1}`,
         name: attendeeDetails[key].name.trim(),
@@ -184,6 +258,10 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
       id: `booking-${demoSettings.event.slug}-demo`,
       eventId: demoSettings.event.id,
       code: `${demoSettings.event.shortTitle.replace(/[^a-z0-9]/gi, "").slice(0, 3).toUpperCase()}-GROUP-2408`,
+      eventSlug: demoSettings.event.slug,
+      eventTitle: demoSettings.event.title,
+      eventDate: demoSettings.event.dateLabel,
+      eventVenue: demoSettings.event.venue,
       qrToken: `demo://${demoSettings.event.slug}/booking-demo`,
       buyerName: buyer.name,
       buyerEmail: buyer.email,
@@ -200,30 +278,137 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
   }
 
   function complete(paymentStatus: Booking["paymentStatus"]) {
-    const booking = buildBooking(paymentStatus);
+    const booking = confirmedBooking ?? buildBooking(paymentStatus);
     window.localStorage.setItem("nasa-demo-booking", JSON.stringify(booking));
     window.localStorage.removeItem("nasa-demo-checkins");
     setBusy(true);
     window.setTimeout(() => {
-      window.location.href = "/guest-pass";
+      window.location.href = `/guest-pass/${encodeURIComponent(booking.code)}`;
     }, 650);
   }
 
-  function pay(success: boolean) {
-    setPaymentState("processing");
-    window.setTimeout(() => {
-      if (!success) {
-        setPaymentState("declined");
-        return;
-      }
-      setPaymentState("ready");
-      setStep(5);
-    }, 800);
+  async function loadConfirmedBooking(access: BookingAccess) {
+    const response = await fetch(`/api/v1/public/bookings/${access.bookingId}`, { headers: { "x-booking-token": access.managementToken } });
+    const result = await response.json() as ApiEnvelope<{
+      id: string; eventId: string; code: string; status: string; paymentStatus: string; buyerName: string; buyerEmail: string; buyerPhone: string | null; currency: string; subtotalMinor: number; feesMinor: number; totalMinor: number; admissionMode: AdmissionMode; qrToken: string | null; createdAt: string;
+      attendees: Array<{ id: string; name: string; email: string | null; phone: string | null; seatId: string | null; seatLabel: string | null; priceBandName: string; priceMinor: number }>;
+    }>;
+    if (!response.ok || !result.data || result.data.status !== "confirmed" || !result.data.qrToken) throw new Error(result.error?.message ?? "The booking is not confirmed yet.");
+    const data = result.data;
+    const booking: Booking = {
+      id: data.id, eventId: data.eventId, code: data.code, qrToken: data.qrToken!, buyerName: data.buyerName, buyerEmail: data.buyerEmail, buyerPhone: data.buyerPhone ?? "", currency: data.currency, admissionMode: data.admissionMode,
+      attendees: data.attendees.map((attendee) => ({ id: attendee.id, name: attendee.name, email: attendee.email ?? undefined, phone: attendee.phone ?? undefined, seatId: attendee.seatId ?? undefined, seatLabel: attendee.seatLabel ?? undefined, priceBandName: attendee.priceBandName, price: attendee.priceMinor / 100 })),
+      subtotal: data.subtotalMinor / 100, fees: data.feesMinor / 100, total: data.totalMinor / 100, paymentStatus: data.paymentStatus === "paid" ? "paid" : "not-required", createdAt: new Date(data.createdAt).toLocaleString("en-NG"),
+    };
+    setConfirmedBooking(booking);
+    return booking;
   }
 
-  function continueFromSeats() {
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("payment") !== "return") return;
+    const saved = window.sessionStorage.getItem(`nasa-booking:${eventSlug}`);
+    if (!saved) {
+      setFlowError("Your payment returned successfully, but this browser no longer has the booking access details. Contact the event organizer with your payment reference.");
+      return;
+    }
+    let cancelled = false;
+    let access: BookingAccess;
+    try {
+      access = JSON.parse(saved) as BookingAccess;
+    } catch {
+      setFlowError("The saved booking details are invalid. Contact the event organizer with your payment reference.");
+      return;
+    }
+    setBookingAccess(access);
+    setBusy(true);
+    void (async () => {
+      for (let attempt = 0; attempt < 6 && !cancelled; attempt += 1) {
+        try {
+          const booking = await loadConfirmedBooking(access);
+          if (cancelled) return;
+          window.localStorage.setItem("nasa-demo-booking", JSON.stringify(booking));
+          setStep(5);
+          setFlowError("");
+          window.history.replaceState({}, "", `/events/${eventSlug}/rsvp`);
+          setBusy(false);
+          return;
+        } catch {
+          await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        }
+      }
+      if (!cancelled) {
+        setBusy(false);
+        setStep(4);
+        setFlowError("Payment confirmation is still processing. Use Retry payment status in a moment; you will not be charged twice.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [eventSlug]);
+
+  async function prepareBooking() {
+    if (!holdToken || holdSeconds <= 0) {
+      setFlowError("Your ticket hold has expired. Return to ticket selection and try again.");
+      return;
+    }
+    setBusy(true);
+    setFlowError("");
+    const attendees = placeKeys.map((key) => ({
+      name: attendeeDetails[key].name.trim(), email: attendeeDetails[key].email.trim(), phone: attendeeDetails[key].phone.trim() || undefined,
+      seatId: admissionMode === "selectable" ? activeSeatById.get(key)?.inventoryId : undefined,
+      ticketCategoryId: admissionMode === "selectable" ? undefined : selectedTier.id,
+      answers: {},
+    }));
+    try {
+      const response = await fetch(`/api/v1/public/events/${eventSlug}/bookings`, {
+        method: "POST", credentials: "include", headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify({ holdToken, buyerName: buyer.name, buyerEmail: buyer.email, buyerPhone: buyer.phone || undefined, attendees, answers: {} }),
+      });
+      const result = await response.json() as ApiEnvelope<{ bookingId: string; managementToken: string; paymentRequired: boolean }>;
+      if (!response.ok || !result.data?.managementToken) throw new Error(result.error?.message ?? "The booking could not be created.");
+      const access = { bookingId: result.data.bookingId, managementToken: result.data.managementToken };
+      setBookingAccess(access);
+      window.sessionStorage.setItem(`nasa-booking:${eventSlug}`, JSON.stringify(access));
+      if (!result.data.paymentRequired) await loadConfirmedBooking(access);
+      setStep(4);
+    } catch (error) {
+      setFlowError(error instanceof Error ? error.message : "The booking could not be created.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pay(success: boolean) {
+    if (!bookingAccess) return;
+    setPaymentState("processing");
+    setFlowError("");
+    if (!success) {
+      setPaymentState("declined");
+      return;
+    }
+    try {
+      if (process.env.NODE_ENV !== "production") {
+        const response = await fetch("/api/v1/payments/simulate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...bookingAccess, outcome: "success" }) });
+        const result = await response.json() as ApiEnvelope<{ confirmed: boolean }>;
+        if (!response.ok) throw new Error(result.error?.message ?? "Payment could not be completed.");
+        await loadConfirmedBooking(bookingAccess);
+        setPaymentState("ready");
+        setStep(5);
+        return;
+      }
+      const response = await fetch("/api/v1/payments/initialize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(bookingAccess) });
+      const result = await response.json() as ApiEnvelope<{ authorizationUrl: string }>;
+      if (!response.ok || !result.data) throw new Error(result.error?.message ?? "Payment could not be started.");
+      window.location.href = result.data.authorizationUrl;
+    } catch (error) {
+      setPaymentState("ready");
+      setFlowError(error instanceof Error ? error.message : "Payment could not be completed.");
+    }
+  }
+
+  async function continueFromSeats() {
     if (admissionMode === "selectable" && !selectedIds.length) return;
-    setStep(3);
+    if (await createHold()) setStep(3);
   }
 
   const minutes = String(Math.floor(holdSeconds / 60)).padStart(2, "0");
@@ -240,6 +425,12 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
         </span>
         <span>{step === 1 ? "Your response" : step === 2 ? (admissionMode === "selectable" ? "Choose seats" : "Choose tickets") : step === 3 ? "Attendee details" : step === 4 && pricingMode === "paid" ? "Payment" : "Review"}</span>
       </div>
+      {flowError && (
+        <div className="payment-error rsvp-flow-error" role="alert">
+          <AlertCircle size={17} />
+          <span><b>We could not continue</b><small>{flowError}</small></span>
+        </div>
+      )}
 
       {step === 1 && (
         <section className="rsvp-step">
@@ -298,14 +489,14 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
             <aside className="booking-filters">
               <div className="booking-view-toggle">
                 <button type="button" className={view === "map" ? "active" : ""} onClick={() => setView("map")}>
-                  <Map size={15} /> Map
+                  <MapIcon size={15} /> Map
                 </button>
                 <button type="button" className={view === "list" ? "active" : ""} onClick={() => setView("list")}>
                   <List size={15} /> List
                 </button>
               </div>
               <small>PRICE RANGE</small>
-              {demoPriceBands.map((band) => (
+              {activePriceBands.map((band) => (
                 <label key={band.id}>
                   <input type="checkbox" checked={enabledBands.includes(band.id)} onChange={() => toggleBand(band.id)} />
                   <i style={{ background: band.color }} />
@@ -331,33 +522,37 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
                 </span>
               </div>
             </aside>
-            <div className={`guest-seat-map guest-seat-map--${view}`}>
-              <div className="guest-stage">MAIN STAGE</div>
+            <div className={`guest-seat-map guest-seat-map--${view} ${view === "map" ? "guest-seat-map--planned" : ""}`} aria-busy={inventoryLoading}>
+              {inventoryLoading && <div className="guest-seat-map__loading" role="status" aria-live="polite"><LoaderCircle size={28} /><b>Loading current seating</b><small>Updating seats and prices…</small></div>}
               {view === "map" ? (
-                demoLayoutObjects
-                  .filter((object) => object.seatCount > 0)
-                  .map((object) => (
-                    <section className={`guest-seat-group guest-seat-group--${object.type}`} key={object.id}>
+                activeLayoutObjects.map((object) => {
+                  const objectStyle = { left: `${object.x}%`, top: `${object.y}%`, width: `${object.width}%`, height: `${object.height}%`, transform: `rotate(${object.rotation}deg)` };
+                  if (object.type === "stage") return <div key={object.id} className="guest-layout-stage" style={objectStyle}>{object.label}</div>;
+                  if (object.type === "aisle") return <div key={object.id} className="guest-layout-aisle" style={objectStyle} aria-label={object.label} />;
+                  if (object.type === "label") return <div key={object.id} className="guest-layout-label" style={objectStyle}>{object.label}</div>;
+                  const seatsForObject = activeSeats.filter((seat) => seat.objectId === object.id);
+                  return (
+                    <section className={`guest-seat-group guest-seat-group--${object.type}`} key={object.id} style={objectStyle}>
                       <h3>{object.label}</h3>
                       <div>
-                        {demoSeats
-                          .filter((seat) => seat.objectId === object.id)
-                          .map((seat) => {
-                            const band = demoPriceBands.find((item) => item.id === seat.priceBandId)!;
+                        {seatsForObject.map((seat, index) => {
+                            const band = activePriceBands.find((item) => item.id === seat.priceBandId) ?? { name: "Unpriced", color: "#8a8391", price: 0 };
+                            const liveStatus = seat.status;
                             const selected = selectedIds.includes(seat.id);
                             const hidden = !enabledBands.includes(seat.priceBandId);
                             return (
                               <button
                                 type="button"
                                 key={seat.id}
-                                className={`guest-seat guest-seat--${seat.status} ${selected ? "selected" : ""} ${hidden ? "filtered" : ""}`}
+                                className={`guest-seat guest-seat--${liveStatus} ${selected ? "selected" : ""} ${hidden ? "filtered" : ""}`}
                                 style={
                                   {
                                     "--seat-band": band.color,
+                                    ...guestSeatPosition(object.type, index, seatsForObject.length),
                                   } as React.CSSProperties
                                 }
                                 onClick={() => toggleSeat(seat.id)}
-                                disabled={seat.status !== "available" || hidden}
+                                disabled={inventoryLoading || liveStatus !== "available" || hidden}
                                 aria-pressed={selected}
                                 title={`${seat.label}, ${pricingMode === "free" ? "Free" : formatMoney(band.price)}`}
                               >
@@ -368,19 +563,21 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
                           })}
                       </div>
                     </section>
-                  ))
+                  );
+                })
               ) : (
                 <div className="seat-accessible-list">
-                  {demoSeats
+                  {activeSeats
                     .filter((seat) => enabledBands.includes(seat.priceBandId))
                     .map((seat) => {
-                      const band = demoPriceBands.find((item) => item.id === seat.priceBandId)!;
+                      const band = activePriceBands.find((item) => item.id === seat.priceBandId) ?? { name: "Unpriced", price: 0 };
+                      const liveStatus = seat.status;
                       return (
-                        <button type="button" key={seat.id} className={selectedIds.includes(seat.id) ? "selected" : ""} onClick={() => toggleSeat(seat.id)} disabled={seat.status !== "available"}>
+                        <button type="button" key={seat.id} className={selectedIds.includes(seat.id) ? "selected" : ""} onClick={() => toggleSeat(seat.id)} disabled={inventoryLoading || liveStatus !== "available"}>
                           <span>
                             <b>{seat.label}</b>
                             <small>
-                              {band.name} · {seat.status}
+                              {band.name} · {liveStatus}
                             </small>
                           </span>
                           <em>{pricingMode === "free" ? "Free" : formatMoney(band.price)}</em>
@@ -398,7 +595,7 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
               </div>
               <div className="basket-seat-list">
                 {selectedSeats.map((seat) => {
-                  const band = demoPriceBands.find((item) => item.id === seat.priceBandId)!;
+                  const band = activePriceBands.find((item) => item.id === seat.priceBandId) ?? { name: "Unpriced", color: "#8a8391", price: 0 };
                   return (
                     <div key={seat.id}>
                       <i style={{ background: band.color }} />
@@ -434,8 +631,8 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
                   <strong>{formatMoney(total)}</strong>
                 </span>
               </div>
-              <button className="button button--brand button--large" type="button" disabled={!selectedIds.length || holdSeconds === 0} onClick={continueFromSeats}>
-                Add attendee names <ArrowRight size={16} />
+              <button className="button button--brand button--large" type="button" disabled={!selectedIds.length || holdSeconds === 0 || busy} onClick={continueFromSeats}>
+                {busy ? "Holding seats..." : "Add attendee names"} <ArrowRight size={16} />
               </button>
             </aside>
           </div>
@@ -457,6 +654,8 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
                   onClick={() => {
                     setTierId(tier.id);
                     setQuantity(1);
+                    setHoldToken("");
+                    setHoldSignature("");
                   }}
                 >
                   <i style={{ background: tier.color }} />
@@ -479,11 +678,11 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
               {admissionMode === "general" && <em>{selectedTier.quantityAvailable - quantity} remaining after this order</em>}
             </span>
             <div>
-              <button type="button" onClick={() => setQuantity((value) => Math.max(1, value - 1))}>
+              <button type="button" onClick={() => { setQuantity((value) => Math.max(1, value - 1)); setHoldToken(""); setHoldSignature(""); }}>
                 <Minus size={17} />
               </button>
               <b>{quantity}</b>
-              <button type="button" onClick={() => setQuantity((value) => Math.min(selectedTier.quantityAvailable, value + 1))} disabled={quantity >= selectedTier.quantityAvailable}>
+              <button type="button" onClick={() => { setQuantity((value) => Math.min(selectedTier.quantityAvailable, value + 1)); setHoldToken(""); setHoldSignature(""); }} disabled={quantity >= selectedTier.quantityAvailable}>
                 <Plus size={17} />
               </button>
             </div>
@@ -493,8 +692,8 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
             <button className="button button--quiet" type="button" onClick={back}>
               <ArrowLeft size={16} /> Back
             </button>
-            <button className="button button--brand button--large" type="button" onClick={() => setStep(3)}>
-              Add attendee names <ArrowRight size={17} />
+            <button className="button button--brand button--large" type="button" disabled={busy} onClick={continueFromSeats}>
+              {busy ? "Holding tickets..." : "Add attendee names"} <ArrowRight size={17} />
             </button>
           </div>
         </section>
@@ -523,8 +722,8 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
           </div>
           <div className="attendee-name-list">
             {placeKeys.map((key, index) => {
-              const seat = admissionMode === "selectable" ? demoSeats.find((item) => item.id === key) : undefined;
-              const band = seat ? demoPriceBands.find((item) => item.id === seat.priceBandId)! : selectedTier;
+              const seat = admissionMode === "selectable" ? activeSeatById.get(key) : undefined;
+              const band = seat ? activePriceBands.find((item) => item.id === seat.priceBandId)! : selectedTier;
               const attendee = attendeeDetails[key] ?? { name: "", email: "", phone: "" };
               return (
                 <label key={key}>
@@ -557,8 +756,8 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
             <button className="button button--quiet" type="button" onClick={back}>
               <ArrowLeft size={16} /> Back
             </button>
-            <button className="button button--brand button--large" type="button" disabled={!buyer.name || !buyer.email || !allAttendeeDetailsEntered || !customQuestionsValid} onClick={() => setStep(4)}>
-              {pricingMode === "paid" ? "Continue to payment" : "Review booking"} <ArrowRight size={17} />
+            <button className="button button--brand button--large" type="button" disabled={!buyer.name || !buyer.email || !allAttendeeDetailsEntered || !customQuestionsValid || busy} onClick={prepareBooking}>
+              {busy ? "Creating booking..." : pricingMode === "paid" ? "Continue to payment" : "Review booking"} <ArrowRight size={17} />
             </button>
           </div>
         </section>
@@ -570,7 +769,7 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
             <CreditCard size={24} />
           </span>
           <h1>Complete payment.</h1>
-          <p>This is a realistic prototype checkout. No card is charged.</p>
+          <p>{process.env.NODE_ENV === "production" ? "Payment is completed securely through Paystack." : "Development checkout uses a simulated Paystack result. No card is charged."}</p>
           <div className="checkout-layout">
             <div className="payment-card">
               <div className="mock-payment-banner">
@@ -620,7 +819,7 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
                 {placeKeys.length} {placeKeys.length === 1 ? "attendee" : "attendees"}
               </h3>
               {placeKeys.map((key, index) => {
-                const seat = demoSeats.find((item) => item.id === key);
+                const seat = activeSeatById.get(key);
                 const attendee = attendeeDetails[key];
                 return (
                   <div key={key}>
@@ -652,8 +851,8 @@ export function RsvpFlow({ eventSlug = "lumina-gala" }: { eventSlug?: string }) 
         </section>
       )}
 
-      {step === 4 && pricingMode === "free" && <Review booking={buildBooking("not-required")} busy={busy} onBack={back} onComplete={() => complete("not-required")} />}
-      {step === 5 && pricingMode === "paid" && <Review booking={buildBooking("paid")} busy={busy} onBack={back} onComplete={() => complete("paid")} />}
+      {step === 4 && pricingMode === "free" && <Review booking={confirmedBooking ?? buildBooking("not-required")} busy={busy} onBack={back} onComplete={() => complete("not-required")} />}
+      {step === 5 && pricingMode === "paid" && <Review booking={confirmedBooking ?? buildBooking("paid")} busy={busy} onBack={back} onComplete={() => complete("paid")} />}
     </div>
   );
 }

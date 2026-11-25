@@ -1,0 +1,2 @@
+DROP INDEX "inventory_holds_seat_active_uidx";--> statement-breakpoint
+CREATE UNIQUE INDEX "inventory_holds_seat_active_uidx" ON "inventory_holds" USING btree ("seat_id") WHERE "inventory_holds"."status" = 'active' and "inventory_holds"."seat_id" is not null;

@@ -1,0 +1,10 @@
+import nextEnv from "@next/env";
+import { getDatabase } from "../lib/db/client";
+import { permissions, resourceTerms } from "../db/schema";
+import { categoryNames, eventTypeNames, normalizeTerm } from "../lib/resources/model";
+nextEnv.loadEnvConfig(process.cwd());
+const db = getDatabase();
+await db.insert(resourceTerms).values([...categoryNames.map((name) => ({ kind: "category" as const, name, normalizedName: normalizeTerm(name), status: "approved" })), ...eventTypeNames.map((name) => ({ kind: "eventType" as const, name, normalizedName: normalizeTerm(name), status: "approved" }))]).onConflictDoNothing();
+await db.insert(permissions).values([{ key: "resources.view", group: "Resources", label: "View organization listings" }, { key: "resources.manage", group: "Resources", label: "Manage organization listings" }]).onConflictDoNothing();
+console.log("Resource categories, event types, and permissions are ready. No listings were created.");
+process.exit(0);

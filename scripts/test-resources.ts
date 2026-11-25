@@ -1,0 +1,213 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+import nextEnv from "@next/env";
+import { eq, inArray, like, or, sql } from "drizzle-orm";
+import * as tables from "../db/schema";
+import { getDatabase } from "../lib/db/client";
+import { hashToken } from "../lib/auth/tokens";
+import { emptyResource, type ManagedResource, type ResourceContent, type ResourceResults, type ResourceTerm } from "../lib/resources/model";
+nextEnv.loadEnvConfig(process.cwd());
+const origin = process.env.SMOKE_ORIGIN ?? "http://localhost:5180";
+assert.ok(["localhost", "127.0.0.1"].includes(new URL(origin).hostname));
+const db = getDatabase();
+const runId = randomUUID();
+const userIds = Array.from({ length: 4 }, () => randomUUID());
+const tokens = userIds.map(() => randomUUID());
+const organizationId = randomUUID();
+const listingIds: string[] = [];
+const termIds: string[] = [];
+let browser: { close(): Promise<void> } | undefined;
+async function retry<T>(operation: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try { return await operation(); }
+    catch (error) { lastError = error; if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 1000)); }
+  }
+  throw lastError;
+}
+async function removeStaleResourceFixtures() {
+  const staleUsers = await db.select({ id: tables.users.id }).from(tables.users).where(like(tables.users.emailNormalized, "resource-%@example.invalid"));
+  if (!staleUsers.length) return;
+  const staleUserIds = staleUsers.map((row) => row.id);
+  const staleMemberships = await db.select({ id: tables.organizerMembers.organizerId }).from(tables.organizerMembers).where(inArray(tables.organizerMembers.userId, staleUserIds));
+  const staleOrganizerIds = [...new Set(staleMemberships.map((row) => row.id))];
+  const staleListings = await db.select({ id: tables.resourceListings.id }).from(tables.resourceListings).where(or(inArray(tables.resourceListings.ownerUserId, staleUserIds), staleOrganizerIds.length ? inArray(tables.resourceListings.organizerId, staleOrganizerIds) : undefined));
+  const staleListingIds = staleListings.map((row) => row.id);
+  if (staleListingIds.length) {
+    const staleNotices = await db.select({ id: tables.notifications.id }).from(tables.notifications).where(sql`${tables.notifications.data}->>'resourceId' in (${sql.join(staleListingIds.map((id) => sql`${id}`), sql`, `)})`);
+    if (staleNotices.length) await db.delete(tables.notifications).where(inArray(tables.notifications.id, staleNotices.map((row) => row.id)));
+    await db.delete(tables.resourceListings).where(inArray(tables.resourceListings.id, staleListingIds));
+  }
+  const staleTerms = await db.select({ id: tables.resourceTerms.id }).from(tables.resourceTerms).where(inArray(tables.resourceTerms.proposedBy, staleUserIds));
+  if (staleTerms.length) await db.delete(tables.resourceTerms).where(inArray(tables.resourceTerms.id, staleTerms.map((row) => row.id)));
+  await db.delete(tables.auditLogs).where(inArray(tables.auditLogs.actorUserId, staleUserIds));
+  if (staleOrganizerIds.length) await db.delete(tables.organizers).where(inArray(tables.organizers.id, staleOrganizerIds));
+  await db.delete(tables.users).where(inArray(tables.users.id, staleUserIds));
+  console.log(`Removed ${staleUserIds.length} stale resource-test users before this run.`);
+}
+async function request<T>(path: string, method = "GET", body?: unknown, actor: number | null = 0, expected = 200): Promise<T> {
+  const response = await fetch(`${origin}${path}`, { method, headers: { ...(actor !== null ? { cookie: `nasa_session=${tokens[actor]}` } : {}), ...(body ? { "content-type": "application/json" } : {}), origin }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(120000), redirect: "manual" });
+  const payload = await response.json() as { data?: T; error?: { message?: string } };
+  assert.equal(response.status, expected, `${method} ${path}: ${payload.error?.message ?? response.status}`);
+  return payload.data as T;
+}
+const update = (row: ManagedResource, action: string, content?: ResourceContent, actor = 0, expected = 200) => request<ManagedResource>(`/api/v1/account/resources/${row.id}`, "PATCH", { action, version: row.version, content }, actor, expected);
+const moderate = (row: ManagedResource, action: string, reason = "", expected = 200) => request<ManagedResource>(`/api/v1/platform/resources/${row.id}`, "PATCH", { action, version: row.version, reason }, 2, expected);
+await retry(removeStaleResourceFixtures);
+if (process.env.RESOURCES_CLEANUP_ONLY === "1") {
+  console.log("Resource test fixture cleanup complete.");
+  process.exit(0);
+}
+try {
+  await db.insert(tables.users).values(userIds.map((id, index) => ({ id, firstName: ["Resource", "Other", "Review", "Staff"][index], lastName: "Test", email: `resource-${id}@example.invalid`, emailNormalized: `resource-${id}@example.invalid`, status: "active" })));
+  await db.insert(tables.userSessions).values(userIds.map((id, index) => ({ userId: id, tokenHash: hashToken(tokens[index]), expiresAt: new Date(Date.now() + 3600000) })));
+  await db.insert(tables.organizers).values({ id: organizationId, name: "Resource test organization", slug: `resources-${runId}`, email: `org-${runId}@example.invalid`, status: "active" });
+  await db.insert(tables.organizerMembers).values([{ organizerId: organizationId, userId: userIds[0], userKey: userIds[0], email: `resource-${userIds[0]}@example.invalid`, role: "owner" }, { organizerId: organizationId, userId: userIds[3], userKey: userIds[3], email: `resource-${userIds[3]}@example.invalid`, role: "manager" }]);
+  await db.insert(tables.platformMembers).values({ userId: userIds[2], role: "super_admin", status: "active" });
+  const terms = await request<ResourceTerm[]>("/api/v1/resources/options");
+  const category = terms.find((item) => item.kind === "category")!;
+  const eventType = terms.find((item) => item.kind === "eventType")!;
+  assert.ok(category && eventType);
+  await request("/api/v1/account/resources", "POST", { publisher: "personal" }, null, 401);
+  await request(`/api/v1/account/resources?publisher=${organizationId}`, "GET", undefined, 1, 403);
+  await request(`/api/v1/account/resources?publisher=${organizationId}`, "GET", undefined, 3, 403);
+  let listing = await request<ManagedResource>("/api/v1/account/resources", "POST", { publisher: "personal" }, 0, 201); listingIds.push(listing.id);
+  await update(listing, "submit", undefined, 0, 400);
+  await update(listing, "save", emptyResource, 1, 404);
+  const content: ResourceContent = { ...emptyResource, title: `Service ${runId}`, subtitle: "Thoughtful event coordination", description: "A complete event service for hosts and their guests.", location: "Lagos", categoryIds: [category.id], eventTypeIds: [eventType.id], contact: { ...emptyResource.contact, email: "provider@example.invalid" } };
+  const old = listing;
+  listing = await update(listing, "save", content);
+  await update(old, "save", content, 0, 409);
+  let publicResult = await request<ResourceResults>(`/api/v1/resources?q=${runId}`, "GET", undefined, null);
+  assert.equal(publicResult.total, 0);
+  listing = await update(listing, "submit");
+  await update(listing, "save", content, 0, 400);
+  await request(`/api/v1/platform/resources/${listing.id}`, "PATCH", { action: "approve", version: listing.version }, 0, 403);
+  listing = await moderate(listing, "approve");
+  publicResult = await request<ResourceResults>(`/api/v1/resources?q=${runId}`, "GET", undefined, null);
+  assert.equal(publicResult.total, 1);
+  assert.equal(publicResult.items[0].content.title, content.title);
+  listing = await update(listing, "save", { ...content, title: `Edited ${runId}` });
+  assert.equal((await request<ResourceResults>(`/api/v1/resources?q=${runId}`, "GET", undefined, null)).items[0].content.title, content.title);
+  listing = await update(listing, "submit");
+  listing = await moderate(listing, "reject", "Please clarify your service.");
+  assert.equal((await request<ResourceResults>(`/api/v1/resources?q=${runId}`, "GET", undefined, null)).total, 1);
+  listing = await update(listing, "submit");
+  listing = await update(listing, "withdraw");
+  listing = await update(listing, "submit");
+  listing = await moderate(listing, "approve");
+  listing = await moderate(listing, "suspend", "Test suspension");
+  assert.equal((await request<ResourceResults>(`/api/v1/resources?q=${runId}`, "GET", undefined, null)).total, 0);
+  await update(listing, "republish", undefined, 0, 400);
+  listing = await update(listing, "submit");
+  listing = await moderate(listing, "approve");
+  listing = await update(listing, "unpublish");
+  listing = await update(listing, "republish");
+  const proposal = await request<ResourceTerm>("/api/v1/resources/options", "POST", { kind: "category", name: `Special service ${runId}` }, 0, 201); termIds.push(proposal.id);
+  assert.ok(!(await request<ResourceTerm[]>("/api/v1/resources/options", "GET", undefined, 1)).some((item) => item.id === proposal.id));
+  listing = await update(listing, "save", { ...content, categoryIds: [proposal.id] });
+  listing = await update(listing, "submit");
+  await moderate(listing, "approve", "", 400);
+  await request(`/api/v1/platform/resource-options/${proposal.id}`, "PATCH", { action: "merge", targetId: category.id }, 2);
+  listing = await moderate(listing, "approve");
+  assert.deepEqual(listing.content.categoryIds, [category.id]);
+  await db.update(tables.users).set({ status: "suspended" }).where(eq(tables.users.id, userIds[0]));
+  assert.equal((await request<ResourceResults>(`/api/v1/resources?q=${runId}`, "GET", undefined, null)).total, 0);
+  await db.update(tables.users).set({ status: "active" }).where(eq(tables.users.id, userIds[0]));
+  let orgListing = await request<ManagedResource>("/api/v1/account/resources", "POST", { publisher: organizationId }, 0, 201); listingIds.push(orgListing.id);
+  orgListing = await update(orgListing, "save", { ...content, title: `Organization ${runId}`, location: "Abuja" });
+  orgListing = await update(orgListing, "submit"); orgListing = await moderate(orgListing, "approve");
+  const combined = await request<ResourceResults>(`/api/v1/resources?q=${runId}&location=Lagos&category=${category.id}&eventType=${eventType.id}`, "GET", undefined, null);
+  assert.equal(combined.total, 1);
+  await db.update(tables.organizers).set({ status: "blocked" }).where(eq(tables.organizers.id, organizationId));
+  assert.equal((await request<ResourceResults>(`/api/v1/resources?q=Organization%20${runId}`, "GET", undefined, null)).total, 0);
+  await db.update(tables.organizers).set({ status: "active" }).where(eq(tables.organizers.id, organizationId));
+  const fakeImage = { assetId: randomUUID(), url: "https://example.com/fake.png", alt: "Fake image" };
+  await update(listing, "save", { ...content, images: [fakeImage] }, 0, 400);
+  await update(listing, "save", { ...content, images: Array.from({ length: 6 }, () => ({ ...fakeImage, assetId: randomUUID() })) }, 0, 400);
+  await request("/api/v1/resources/media", "POST", { publisher: organizationId, action: "sign" }, 1, 403);
+  await request("/api/v1/resources/media", "POST", { publisher: "personal", action: "register", providerId: "another-account/photo", alt: "Not mine" }, 0, 400);
+  const notices = await db.select().from(tables.notifications).where(sql`${tables.notifications.data}->>'resourceId' = ${listing.id}`);
+  assert.ok(notices.some((notice) => notice.type === "resource.submitted"));
+  assert.ok(notices.some((notice) => notice.type === "resource.approved"));
+  const deliveries = await db.select().from(tables.notificationDeliveries).where(inArray(tables.notificationDeliveries.notificationId, notices.map((notice) => notice.id)));
+  assert.ok(deliveries.length > 0 && deliveries.every((delivery) => delivery.status === "queued"));
+  console.log("Resource API checks passed: ownership, draft/revision lifecycle, moderation, proposals, visibility, filters, media rejection, notification outbox.");
+  if (process.env.RESOURCES_PLAYWRIGHT_PATH) {
+    const { chromium } = await import(pathToFileURL(process.env.RESOURCES_PLAYWRIGHT_PATH).href);
+    const launched = await chromium.launch({ headless: true, channel: "chrome" }); browser = launched;
+    const context = await launched.newContext({ viewport: { width: 1440, height: 1000 } });
+    await context.addCookies([{ name: "nasa_session", value: tokens[0], url: origin }]);
+    const page = await context.newPage();
+    const errors: string[] = []; page.on("pageerror", (error: Error) => errors.push(error.message));
+    await mkdir("outputs/resources", { recursive: true });
+    await page.goto(`${origin}/resources?q=${runId}`, { waitUntil: "networkidle" });
+    assert.equal(await page.locator(".rs-card").count(), 2);
+    await page.screenshot({ path: "outputs/resources/directory-desktop.png", fullPage: true });
+    await page.locator(".rs-card").first().click();
+    await page.getByRole("link", { name: "Send email" }).waitFor();
+    await page.screenshot({ path: "outputs/resources/detail-desktop.png", fullPage: true });
+    await page.goto(`${origin}/account/resources`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "Edit listing", exact: true }).first().click();
+    await page.getByRole("checkbox", { name: eventType.name, exact: true }).waitFor();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByLabel("Title", { exact: true }).fill(`Browser edited ${runId}`);
+    await page.getByRole("button", { name: "Save draft" }).click();
+    await page.getByText("Draft saved", { exact: true }).first().waitFor();
+    await page.reload({ waitUntil: "networkidle" });
+    assert.ok((await page.locator(".rs-managed-list").innerText()).includes(`Browser edited ${runId}`));
+    await page.getByRole("button", { name: "Edit listing", exact: true }).first().click();
+    await page.getByRole("button", { name: /Listing details/ }).click();
+    await page.screenshot({ path: "outputs/resources/editor-desktop.png", fullPage: true });
+    await page.getByRole("button", { name: "My listings", exact: true }).click();
+    await page.goto(`${origin}/resources?q=${runId}`, { waitUntil: "networkidle" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: "outputs/resources/directory-mobile.png", fullPage: true });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    await page.getByRole("button", { name: /^Filters/ }).click();
+    await page.getByRole("dialog").getByRole("checkbox", { name: /Lagos/ }).click();
+    await page.waitForURL(/location=Lagos/);
+    await page.getByRole("button", { name: /^Show 1 listings/ }).click();
+    assert.equal(await page.locator(".rs-card").count(), 1);
+    assert.ok(page.url().includes("location=Lagos"));
+    await page.reload({ waitUntil: "networkidle" });
+    assert.equal(await page.locator(".rs-card").count(), 1);
+    await page.goto(`${origin}/account/resources`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "Edit listing", exact: true }).first().click();
+    await page.getByRole("button", { name: /Listing details/ }).click();
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    await page.screenshot({ path: "outputs/resources/editor-mobile.png", fullPage: true });
+    await context.clearCookies();
+    await context.addCookies([{ name: "nasa_session", value: tokens[2], url: origin }]);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto(`${origin}/platform/resources`, { waitUntil: "networkidle" });
+    await page.locator(".rs-manager-toolbar select").selectOption("all");
+    await page.getByLabel("Search resource reviews").fill(runId);
+    await page.getByRole("button", { name: "Review", exact: true }).first().click();
+    await page.getByRole("dialog").waitFor();
+    await page.screenshot({ path: "outputs/resources/admin-review.png", fullPage: true });
+    await page.getByRole("button", { name: "Close review" }).click();
+    await context.clearCookies();
+    await page.goto(`${origin}/account/resources?create=1`, { waitUntil: "networkidle" });
+    assert.ok(page.url().includes("returnTo=%2Faccount%2Fresources%3Fcreate%3D1"));
+    assert.deepEqual(errors, []);
+    console.log("Resource browser checks passed: directory, detail, editor persistence, mobile filters, admin preview, login return path.");
+  }
+  const [latest] = await db.select().from(tables.resourceListings).where(eq(tables.resourceListings.id, listing.id));
+  await update(latest as unknown as ManagedResource, "archive");
+  assert.equal((await request<ResourceResults>(`/api/v1/resources?q=${runId}&location=Lagos`, "GET", undefined, null)).total, 0);
+} finally {
+  await browser?.close();
+  await retry(async () => {
+    const notices = listingIds.length ? await db.select({ id: tables.notifications.id }).from(tables.notifications).where(sql`${tables.notifications.data}->>'resourceId' in (${sql.join(listingIds.map((id) => sql`${id}`), sql`, `)})`) : [];
+    if (notices.length) await db.delete(tables.notifications).where(inArray(tables.notifications.id, notices.map((row) => row.id)));
+    if (listingIds.length) await db.delete(tables.resourceListings).where(inArray(tables.resourceListings.id, listingIds));
+    if (termIds.length) await db.delete(tables.resourceTerms).where(inArray(tables.resourceTerms.id, termIds));
+    await db.delete(tables.auditLogs).where(inArray(tables.auditLogs.actorUserId, userIds));
+    await db.delete(tables.organizers).where(eq(tables.organizers.id, organizationId));
+    await db.delete(tables.users).where(inArray(tables.users.id, userIds));
+  });
+  console.log("Resource test records removed. No test emails sent.");
+}

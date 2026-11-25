@@ -5,7 +5,7 @@ export type EventCategory =
   | "Community"
   | "Wedding";
 
-export type EventStatus = "draft" | "published" | "closed";
+export type EventStatus = "draft" | "pending_approval" | "published" | "closed";
 export type RsvpStatus = "confirmed" | "pending" | "declined";
 export type CheckInStatus = "checked-in" | "not-checked-in";
 export type PricingMode = "free" | "paid";
@@ -30,6 +30,8 @@ export interface EventScheduleItem {
   title: string;
   subtitle?: string;
   description: string;
+  scheduleMode?: "day" | "date" | "time" | "date-time";
+  dayLabel?: string;
   startISO: string;
   endISO: string;
   venue: string;
@@ -57,6 +59,7 @@ export interface TravelRecommendation {
   title: string;
   description: string;
   url?: string;
+  media?: EventMedia;
 }
 
 export interface GiftMethod {
@@ -112,6 +115,7 @@ export interface EventPageConfig {
   primaryAction: { type: "native" | "external"; label: string; url?: string };
   sections: EventPageSection[];
   seo: { title: string; description: string; image?: string };
+  eventDates?: string[];
 }
 
 export interface Organizer {
@@ -232,6 +236,10 @@ export interface Booking {
   id: string;
   eventId: string;
   code: string;
+  eventSlug?: string;
+  eventTitle?: string;
+  eventDate?: string;
+  eventVenue?: string;
   qrToken: string;
   buyerName: string;
   buyerEmail: string;

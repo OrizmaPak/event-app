@@ -16,6 +16,7 @@ import {
   Redo2,
   RotateCw,
   Rows3,
+  Save,
   Tag,
   Trash2,
   Type,
@@ -32,6 +33,7 @@ import type { LayoutObject, LayoutObjectType, PriceBand, SeatStatus } from "@/li
 type SeatEdit = { priceBandId?: string; status?: SeatStatus; note?: string };
 type DragState = { id: string; startX: number; startY: number; objectX: number; objectY: number } | null;
 type BandDraft = { name: string; price: string; color: string };
+export type SeatPlanDraft = { objects: LayoutObject[]; bands: PriceBand[]; seatEdits: Record<string, SeatEdit>; canvas: { width: number; height: number } };
 
 const tools: { type: LayoutObjectType; label: string; icon: typeof CircleDot }[] = [
   { type: "round-table", label: "Round table", icon: CircleDot },
@@ -75,24 +77,26 @@ function seatPosition(type: LayoutObjectType, index: number, total: number) {
   return { left: `${50 + Math.cos(angle) * 45}%`, top: `${50 + Math.sin(angle) * 45}%` };
 }
 
-export function SeatPlanBuilder({ initialObjects = [], heading = "Design the guest view", eyebrow = "Freeform room planner" }: { initialObjects?: LayoutObject[]; heading?: string; eyebrow?: string }) {
+export function SeatPlanBuilder({ initialObjects = [], initialBands = demoPriceBands, initialSeatEdits = {}, initialCanvas, heading = "Design the guest view", eyebrow = "Freeform room planner", onChange, onSaved, saveUrl }: { initialObjects?: LayoutObject[]; initialBands?: PriceBand[]; initialSeatEdits?: Record<string, SeatEdit>; initialCanvas?: { width: number; height: number }; heading?: string; eyebrow?: string; onChange?: (draft: SeatPlanDraft) => void; onSaved?: (draft: SeatPlanDraft) => void; saveUrl?: string }) {
   const [objects, setObjects] = useState<LayoutObject[]>(() => initialObjects.map((object) => ({ ...object })));
   const [history, setHistory] = useState<LayoutObject[][]>([]);
   const [future, setFuture] = useState<LayoutObject[][]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
-  const [seatEdits, setSeatEdits] = useState<Record<string, SeatEdit>>({});
-  const [bands, setBands] = useState<PriceBand[]>(demoPriceBands);
+  const [seatEdits, setSeatEdits] = useState<Record<string, SeatEdit>>(() => ({ ...initialSeatEdits }));
+  const [bands, setBands] = useState<PriceBand[]>(() => initialBands.map((band) => ({ ...band })));
   const [editingBandId, setEditingBandId] = useState<string | null>(null);
   const [bandDraft, setBandDraft] = useState<BandDraft>({ name: "", price: "", color: "#7557ff" });
   const [zoom, setZoom] = useState(100);
-  const [canvasWidth, setCanvasWidth] = useState(initialObjects.length ? 1180 : 980);
-  const [canvasHeight, setCanvasHeight] = useState(initialObjects.length ? 820 : 700);
+  const [canvasWidth, setCanvasWidth] = useState(initialCanvas?.width ?? (initialObjects.length ? 1180 : 980));
+  const [canvasHeight, setCanvasHeight] = useState(initialCanvas?.height ?? (initialObjects.length ? 820 : 700));
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const [snap, setSnap] = useState(true);
   const [drag, setDrag] = useState<DragState>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveNotice, setSaveNotice] = useState("");
   const builderRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -121,6 +125,8 @@ export function SeatPlanBuilder({ initialObjects = [], heading = "Design the gue
     document.addEventListener("fullscreenchange", syncNativeFullscreen);
     return () => document.removeEventListener("fullscreenchange", syncNativeFullscreen);
   }, []);
+
+  useEffect(() => { onChange?.({ objects, bands, seatEdits, canvas: { width: canvasWidth, height: canvasHeight } }); }, [objects, bands, seatEdits, canvasWidth, canvasHeight, onChange]);
 
   function commit(next: LayoutObject[]) {
     setHistory((items) => [...items.slice(-19), objects]);
@@ -207,6 +213,23 @@ export function SeatPlanBuilder({ initialObjects = [], heading = "Design the gue
     setSeatEdits((items) => ({ ...items, [selectedSeat]: { ...items[selectedSeat], ...patch } }));
   }
 
+  async function savePlan() {
+    if (!saveUrl) return;
+    setSaving(true);
+    setSaveNotice("");
+    try {
+      const response = await fetch(saveUrl, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ objects, bands, seatEdits, canvas: { width: canvasWidth, height: canvasHeight } }) });
+      const body = await response.json() as { error?: { message?: string } };
+      if (!response.ok) throw new Error(body.error?.message ?? "The seating plan could not be saved.");
+      setSaveNotice("Seating plan saved.");
+      onSaved?.({ objects, bands, seatEdits, canvas: { width: canvasWidth, height: canvasHeight } });
+    } catch (error) {
+      setSaveNotice(error instanceof Error ? error.message : "The seating plan could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function openNewBand() {
     setEditingBandId("new");
     setBandDraft({ name: "", price: "", color: "#7557ff" });
@@ -257,7 +280,7 @@ export function SeatPlanBuilder({ initialObjects = [], heading = "Design the gue
   return (
     <div ref={builderRef} className={`seat-builder ${isFullscreen ? "seat-builder--fullscreen" : ""} ${isNativeFullscreen ? "seat-builder--native-fullscreen" : ""}`}>
       <header className="seat-builder__top">
-        <div><span className="dashboard-eyebrow">{eyebrow}</span><h2>{heading}</h2></div>
+        <div><span className="dashboard-eyebrow">{eyebrow}</span><h2>{heading}</h2>{saveNotice && <small className="seat-builder__save-notice" role="status">{saveNotice}</small>}</div>
         <div className="seat-builder__history">
           <button type="button" onClick={undo} disabled={!history.length} title="Undo"><Undo2 size={16} /></button>
           <button type="button" onClick={redo} disabled={!future.length} title="Redo"><Redo2 size={16} /></button>
@@ -270,6 +293,7 @@ export function SeatPlanBuilder({ initialObjects = [], heading = "Design the gue
             {isNativeFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
             {isNativeFullscreen ? "Close full" : "Full screen"}
           </button>
+          {saveUrl && <button type="button" className="seat-builder__save" onClick={() => void savePlan()} disabled={saving}><Save size={15} /> {saving ? "Saving..." : "Save"}</button>}
         </div>
       </header>
 
@@ -350,7 +374,7 @@ export function SeatPlanBuilder({ initialObjects = [], heading = "Design the gue
             <div className="seat-inspector__head"><div><small>{selectedSeat ? "SEAT SETTINGS" : "OBJECT SETTINGS"}</small><h3>{selectedSeat ? `${selected.label} · Seat ${Number(selectedSeat.split(":")[1]) + 1}` : selected.label}</h3></div><button type="button" onClick={remove} title="Delete selected"><Trash2 size={16} /></button></div>
             {selectedSeat ? <>
               <label><span>Price band</span><select value={currentSeatEdit?.priceBandId ?? selected.priceBandId} onChange={(event) => updateSeat({ priceBandId: event.target.value })}>{bands.map((band) => <option value={band.id} key={band.id}>{band.name} · {compactMoney(band.price)}</option>)}</select></label>
-              <label><span>Seat status</span><select value={currentSeatEdit?.status ?? "available"} onChange={(event) => updateSeat({ status: event.target.value as SeatStatus, note: "" })}><option value="available">Available</option><option value="reserved">Named reservation</option><option value="blocked">Blocked</option><option value="unavailable">Unavailable</option></select></label>
+              <label><span>Seat status</span><select value={currentSeatEdit?.status ?? "available"} onChange={(event) => updateSeat({ status: event.target.value as SeatStatus, note: "" })}><option value="available">Available</option><option value="reserved">Named reservation</option><option value="blocked">Blocked</option><option value="unavailable">Unavailable</option>{currentSeatEdit?.status === "booked" && <option value="booked" disabled>Booked</option>}{currentSeatEdit?.status === "held" && <option value="held" disabled>Temporarily held</option>}</select></label>
               {(currentSeatEdit?.status === "reserved" || currentSeatEdit?.status === "blocked") && <label><span>{currentSeatEdit.status === "reserved" ? "Reserved for" : "Internal reason"}</span><input value={currentSeatEdit.note ?? ""} onChange={(event) => updateSeat({ note: event.target.value })} placeholder={currentSeatEdit.status === "reserved" ? "Attendee name" : "e.g. Equipment"} /></label>}
               <div className="seat-state-note">{currentSeatEdit?.status === "reserved" ? <UserRoundCheck size={16} /> : currentSeatEdit?.status === "blocked" ? <Ban size={16} /> : <Tag size={16} />}<span>{currentSeatEdit?.note || "This seat is publicly selectable."}</span></div>
             </> : <>

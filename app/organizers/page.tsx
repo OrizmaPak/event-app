@@ -6,6 +6,7 @@ import { PublicHeader } from "@/components/public/PublicHeader";
 import { nasaClient } from "@/lib/services/nasa-client";
 
 export const metadata: Metadata = { title: "Event organizers" };
+export const dynamic = "force-dynamic";
 
 export default async function OrganizersPage() {
   const organizers = await nasaClient.listOrganizers();

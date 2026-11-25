@@ -1,0 +1,11 @@
+function escapeHtml(value: string) {
+  return value.replace(/[&<>\"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '\"': "&quot;", "'": "&#39;" })[character] ?? character);
+}
+
+export function buildInvitationEmail({ roleName, eventScope, acceptUrl, expiresAt }: { roleName: string; eventScope: string; acceptUrl: string; expiresAt: Date }) {
+  const expiresLabel = new Intl.DateTimeFormat("en-NG", { dateStyle: "medium" }).format(expiresAt);
+  const safeRole = escapeHtml(roleName);
+  const safeScope = escapeHtml(eventScope === "all" ? "all events" : eventScope);
+  const safeUrl = escapeHtml(acceptUrl);
+  return `<!doctype html><html><body style="margin:0;background:#f4f6f8;color:#17202a;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:32px 16px;background:#f4f6f8"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border:1px solid #e3e7eb;border-radius:18px;overflow:hidden;box-shadow:0 12px 32px rgba(20,35,50,.08)"><tr><td style="padding:24px 30px;background:#111827;color:#fff"><div style="font-size:12px;letter-spacing:2px;font-weight:700;color:#f0b4b4">NASA EVENT</div><div style="margin-top:8px;font-size:26px;font-weight:700">You're invited</div></td></tr><tr><td style="padding:32px 30px"><p style="margin:0 0 12px;font-size:18px;font-weight:700">You're invited as a ${safeRole}.</p><p style="margin:0 0 24px;line-height:1.6;color:#4b5563">Join the workspace to help manage ${safeScope}. Accept your invitation below to get started.</p><a href="${safeUrl}" style="display:inline-block;padding:13px 20px;background:#b63737;color:#fff;text-decoration:none;border-radius:9px;font-weight:700">Accept invitation</a><p style="margin:24px 0 0;padding-top:18px;border-top:1px solid #edf0f2;font-size:13px;line-height:1.6;color:#6b7280">This invitation expires on <strong>${expiresLabel}</strong>, seven days from when it was sent. If you were not expecting this invitation, you can ignore this email.</p></td></tr><tr><td style="padding:18px 30px;background:#fafbfc;color:#8a929d;font-size:12px">NASA EVENT workspace access</td></tr></table></td></tr></table></body></html>`;
+}

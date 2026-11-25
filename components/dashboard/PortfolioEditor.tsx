@@ -1,12 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Check, ExternalLink, Eye, Globe2, ImagePlus, Save, Sparkles, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Check, ExternalLink, Eye, Globe2, ImagePlus, Loader2, Save, Sparkles, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { featuredOrganizer } from "@/lib/data/mock-data";
 import type { PortfolioGalleryImage } from "@/lib/data/types";
-
-const galleryStorageKey = `nasa-portfolio-gallery:${featuredOrganizer.slug}`;
 
 export function PortfolioEditor() {
   const [name, setName] = useState("Velvet & Vine Experiences");
@@ -14,22 +12,48 @@ export function PortfolioEditor() {
   const [visible, setVisible] = useState(true);
   const [saved, setSaved] = useState(false);
   const [gallery, setGallery] = useState<PortfolioGalleryImage[]>(featuredOrganizer.gallery ?? []);
+  const [about, setAbout] = useState(featuredOrganizer.bio);
+  const [city, setCity] = useState(featuredOrganizer.city);
+  const [email, setEmail] = useState(featuredOrganizer.email);
+  const [phone, setPhone] = useState(featuredOrganizer.phone);
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    try {
-      const savedGallery = window.localStorage.getItem(galleryStorageKey);
-      if (!savedGallery) return;
-      const parsed = JSON.parse(savedGallery) as PortfolioGalleryImage[];
-      if (Array.isArray(parsed) && parsed.length) setGallery(parsed);
-    } catch {
-      setGallery(featuredOrganizer.gallery ?? []);
-    }
+    fetch("/api/v1/workspaces/current/profile").then(async (response) => await response.json() as { data?: { name: string; email: string; phone?: string; profile?: Record<string, unknown> } }).then((body) => {
+      if (!body.data) return;
+      const profile = body.data.profile ?? {};
+      setName(body.data.name); setEmail(body.data.email); setPhone(body.data.phone ?? "");
+      setTagline(String(profile.tagline ?? featuredOrganizer.tagline)); setAbout(String(profile.about ?? profile.bio ?? featuredOrganizer.bio)); setCity(String(profile.city ?? featuredOrganizer.city)); setVisible(profile.visible !== false);
+      if (Array.isArray(profile.gallery)) setGallery(profile.gallery as PortfolioGalleryImage[]);
+    }).catch(() => setError("The saved profile could not be loaded."));
   }, []);
 
-  function save() {
-    window.localStorage.setItem(galleryStorageKey, JSON.stringify(gallery.filter((image) => image.src.trim())));
+  async function save() {
+    setError("");
+    const response = await fetch("/api/v1/workspaces/current/profile", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, email, phone, profile: { tagline, about, city, visible, gallery: gallery.filter((image) => image.src.trim()) } }) });
+    const body = await response.json() as { error?: { message?: string } };
+    if (!response.ok) { setError(body.error?.message ?? "The profile could not be saved."); return; }
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1800);
+  }
+
+  async function uploadImage(file: File) {
+    setUploading(true); setError("");
+    try {
+      const signResponse = await fetch("/api/v1/media/sign", { method: "POST" });
+      const signed = await signResponse.json() as { data?: { uploadUrl: string; apiKey: string; timestamp: number; folder: string; signature: string }; error?: { message?: string } };
+      if (!signResponse.ok || !signed.data) throw new Error(signed.error?.message ?? "Media upload is unavailable.");
+      const form = new FormData(); form.set("file", file); form.set("api_key", signed.data.apiKey); form.set("timestamp", String(signed.data.timestamp)); form.set("folder", signed.data.folder); form.set("signature", signed.data.signature);
+      const uploadResponse = await fetch(signed.data.uploadUrl, { method: "POST", body: form });
+      const uploaded = await uploadResponse.json() as { public_id?: string; secure_url?: string; width?: number; height?: number; bytes?: number; error?: { message?: string } };
+      if (!uploadResponse.ok || !uploaded.public_id || !uploaded.secure_url) throw new Error(uploaded.error?.message ?? "Image upload failed.");
+      const title = file.name.replace(/\.[^.]+$/, "").replaceAll(/[-_]+/g, " ");
+      await fetch("/api/v1/media", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ providerId: uploaded.public_id, url: uploaded.secure_url, alt: title, width: uploaded.width, height: uploaded.height, bytes: uploaded.bytes }) });
+      setGallery((items) => [...items, { id: uploaded.public_id!, src: uploaded.secure_url!, title, caption: "" }]);
+    } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : "Image upload failed."); }
+    finally { setUploading(false); if (fileInput.current) fileInput.current.value = ""; }
   }
 
   function updateGalleryImage(id: string, patch: Partial<PortfolioGalleryImage>) {
@@ -60,17 +84,19 @@ export function PortfolioEditor() {
       <section className="dashboard-panel portfolio-form">
         <div className="panel-heading">
           <div><small>PUBLIC IDENTITY</small><h2>Organizer profile</h2></div>
-          <button className="button button--brand button--small" onClick={save}>{saved ? <><Check size={14} /> Saved</> : <><Save size={14} /> Save changes</>}</button>
+          <button className="button button--brand button--small" onClick={() => void save()}>{saved ? <><Check size={14} /> Saved</> : <><Save size={14} /> Save changes</>}</button>
         </div>
+        {error && <div className="form-error" role="alert">{error}</div>}
 
         <button className="portfolio-logo-upload" type="button"><span>VV</span><p><b>Change logo</b><small>Square PNG or JPG</small></p><ImagePlus size={18} /></button>
 
         <div className="field-grid">
           <label className="field field--full"><span>Organizer name</span><input value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label className="field field--full"><span>Tagline</span><input value={tagline} onChange={(event) => setTagline(event.target.value)} /></label>
-          <label className="field field--full"><span>About</span><textarea defaultValue="We create warm, beautifully considered experiences across Lagos-from intimate dinners to large cultural celebrations. Every guest touchpoint is designed to feel personal." /></label>
-          <label className="field"><span>City</span><input defaultValue="Lagos, Nigeria" /></label>
-          <label className="field"><span>Contact email</span><input defaultValue="hello@velvetandvine.demo" /></label>
+          <label className="field field--full"><span>About</span><textarea value={about} onChange={(event) => setAbout(event.target.value)} /></label>
+          <label className="field"><span>City</span><input value={city} onChange={(event) => setCity(event.target.value)} /></label>
+          <label className="field"><span>Contact email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+          <label className="field field--full"><span>Phone number</span><input value={phone} onChange={(event) => setPhone(event.target.value)} /></label>
           <label className="field field--full"><span>Public address</span><div className="slug-field"><em>nasaevent.demo/organizers/</em><input defaultValue="velvet-vine" /></div></label>
         </div>
 
@@ -81,9 +107,9 @@ export function PortfolioEditor() {
             <div>
               <small>PUBLIC GALLERY</small>
               <h2>Portfolio images</h2>
-              <p>Create a gallery using image URLs, titles, and captions. Changes are stored in this browser for the prototype.</p>
+              <p>Upload images or add external image URLs. Titles provide accessible descriptions on the public page.</p>
             </div>
-            <button className="button button--outline" type="button" onClick={addGalleryImage}><ImagePlus size={16} /> Add image</button>
+            <div className="portfolio-gallery-actions"><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp,image/avif" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); }} /><button className="button button--brand" type="button" disabled={uploading} onClick={() => fileInput.current?.click()}>{uploading ? <Loader2 size={16} /> : <ImagePlus size={16} />} {uploading ? "Uploading..." : "Upload image"}</button><button className="button button--outline" type="button" onClick={addGalleryImage}><ExternalLink size={16} /> Add URL</button></div>
           </header>
           <div className="portfolio-gallery-editor-list">
             {gallery.map((image, index) => (

@@ -3,13 +3,13 @@ import { NextResponse } from "next/server";
 import { events, invitations, notificationDeliveries, notifications } from "@/db/schema";
 import { getDatabase } from "@/lib/db/client";
 import { generateInvitationCode, hashInvitationCode } from "@/lib/security/invitations";
-import { getOrganizerSession } from "@/lib/server/organizer-auth";
+import { requirePermission } from "@/lib/auth/policy";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getOrganizerSession();
-  if (!session) return NextResponse.json({ data: null, error: { code: "UNAUTHORIZED", message: "Sign in to continue." } }, { status: 401 });
+  const principal = await requirePermission("guests.manage");
+  if (!principal) return NextResponse.json({ data: null, error: { code: "FORBIDDEN", message: "You do not have permission to manage invitations." } }, { status: 403 });
   const body = await request.json().catch(() => ({})) as { action?: "send-new-code" | "revoke" };
-  const [record] = await getDatabase().select({ invitation: invitations, event: events }).from(invitations).innerJoin(events, eq(invitations.eventId, events.id)).where(and(eq(invitations.id, (await params).id), eq(events.organizerId, session.organizerId))).limit(1);
+  const [record] = await getDatabase().select({ invitation: invitations, event: events }).from(invitations).innerJoin(events, eq(invitations.eventId, events.id)).where(and(eq(invitations.id, (await params).id), eq(events.organizerId, principal.organizerId))).limit(1);
   if (!record) return NextResponse.json({ data: null, error: { code: "INVITATION_NOT_FOUND", message: "Invitation not found." } }, { status: 404 });
   if (body.action === "revoke") { await getDatabase().update(invitations).set({ revokedAt: new Date(), status: "revoked", updatedAt: new Date() }).where(eq(invitations.id, record.invitation.id)); return NextResponse.json({ data: { status: "revoked" }, error: null }); }
   const code = generateInvitationCode(record.event.shortTitle);

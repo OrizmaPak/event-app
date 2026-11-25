@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { ThemeProvider } from "@/components/shared/ThemeProvider";
+import { AppToaster } from "@/components/shared/AppToaster";
 import "./globals.css";
+import "./resources.css";
 
 export const metadata: Metadata = {
   title: {
@@ -24,9 +26,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth">
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider><AppToaster />{children}</ThemeProvider>
       </body>
     </html>
   );

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarPlus, ChevronDown, Clock3, ExternalLink, Gift, Hotel, MapPin, Menu, Navigation, ParkingCircle, Plane, Ticket, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CalendarPlus, ChevronDown, Clock3, ExternalLink, Gift, ImageOff, MapPin, Menu, Navigation, Ticket, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { EventPageConfig, EventPageSection, EventRecord, GiftMethod } from "@/lib/data/types";
 
 function actionHref(event: EventRecord, config: EventPageConfig) {
@@ -28,11 +28,16 @@ function calendarHref(item: Extract<EventPageSection, { type: "schedule" }>["ite
 }
 
 function Countdown({ target }: { target: string }) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    const update = () => setNow(Date.now());
+    update();
+    const timer = window.setInterval(update, 1000);
     return () => window.clearInterval(timer);
   }, []);
+  if (now === null) {
+    return <div className="event-countdown" aria-label="Time until event" aria-busy="true">{["days", "hours", "minutes", "seconds"].map((label) => <div key={label}><b>--</b><span>{label}</span></div>)}</div>;
+  }
   const distance = new Date(target).getTime() - now;
   if (distance <= -86_400_000) return <p className="event-countdown__complete">This event has taken place.</p>;
   if (distance <= 0) return <p className="event-countdown__complete">Today is the day.</p>;
@@ -45,6 +50,10 @@ function Countdown({ target }: { target: string }) {
   return <div className="event-countdown" aria-label="Time until event">{values.map(([value, label]) => <div key={label}><b>{String(value).padStart(2, "0")}</b><span>{label}</span></div>)}</div>;
 }
 
+function TravelImagePlaceholder() {
+  return <div className="event-travel-card__placeholder"><ImageOff size={24} /><span>No image available</span></div>;
+}
+
 function GiftMethodCard({ method }: { method: GiftMethod }) {
   const [revealed, setRevealed] = useState(false);
   if (method.type === "link") return <article className="event-gift-card"><span><Gift size={20} /></span><div><h3>{method.label}</h3>{method.description && <p>{method.description}</p>}<a className="event-text-link" href={method.url} target="_blank" rel="noreferrer">Open gift link <ExternalLink size={14} /></a></div></article>;
@@ -54,6 +63,7 @@ function GiftMethodCard({ method }: { method: GiftMethod }) {
 
 function GallerySection({ section }: { section: Extract<EventPageSection, { type: "gallery" }> }) {
   const [active, setActive] = useState<number | null>(null);
+  const media = section.media.filter((item) => item.src.trim());
   useEffect(() => {
     if (active === null) return;
     function close(event: KeyboardEvent) { if (event.key === "Escape") setActive(null); }
@@ -61,8 +71,8 @@ function GallerySection({ section }: { section: Extract<EventPageSection, { type
     return () => window.removeEventListener("keydown", close);
   }, [active]);
   return <>
-    <div className="event-gallery-grid">{section.media.map((media, index) => <button type="button" key={media.id} onClick={() => setActive(index)} aria-label={`Open ${media.alt}`}><img src={media.src} alt={media.alt} /></button>)}</div>
-    {active !== null && <div className="event-lightbox" role="dialog" aria-modal="true" aria-label="Gallery image"><button type="button" onClick={() => setActive(null)} aria-label="Close gallery"><X size={22} /></button><img src={section.media[active].src} alt={section.media[active].alt} /><p>{section.media[active].caption ?? section.media[active].alt}</p></div>}
+    {media.length ? <div className="event-gallery-grid">{media.map((item, index) => <button type="button" key={item.id} onClick={() => setActive(index)} aria-label={`Open ${item.alt || "gallery image"}`}><img src={item.src} alt={item.alt || "Gallery image"} /></button>)}</div> : <TravelImagePlaceholder />}
+    {active !== null && media[active] && <div className="event-lightbox" role="dialog" aria-modal="true" aria-label="Gallery image"><button type="button" onClick={() => setActive(null)} aria-label="Close gallery"><X size={22} /></button><img src={media[active].src} alt={media[active].alt} /><p>{media[active].caption ?? media[active].alt}</p></div>}
   </>;
 }
 
@@ -108,12 +118,62 @@ function SectionHeading({ section }: { section: EventPageSection }) {
 
 export function EventMicrosite({ event, config = event.eventPage!, preview = false, skipAccess = false }: { event: EventRecord; config?: EventPageConfig; preview?: boolean; skipAccess?: boolean }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState("");
+  const stickyNavRef = useRef<HTMLElement | null>(null);
+  const stickyLinkRefs = useRef<Record<string, HTMLAnchorElement | null>>({});
+  const [activeIndicator, setActiveIndicator] = useState({ left: 0, width: 0, visible: false });
   const visibleSections = useMemo(() => config.sections.filter((section) => section.visible), [config.sections]);
   const hero = visibleSections.find((section): section is Extract<EventPageSection, { type: "hero" }> => section.type === "hero");
-  const sections = visibleSections.filter((section) => section.type !== "hero");
-  const scheduleStart = visibleSections.find((section): section is Extract<EventPageSection, { type: "schedule" }> => section.type === "schedule")?.items[0]?.startISO ?? event.dateISO;
+  const sections = useMemo(() => visibleSections.filter((section) => section.type !== "hero"), [visibleSections]);
+  const scheduleStart = event.dateISO || visibleSections.find((section): section is Extract<EventPageSection, { type: "schedule" }> => section.type === "schedule")?.items[0]?.startISO || "";
   const href = actionHref(event, config);
   const external = config.primaryAction.type === "external";
+  useEffect(() => {
+    if (!sections.length) return;
+    const scrollRoot = preview ? document.querySelector<HTMLElement>(".page-builder-preview__canvas") : null;
+    const elements = sections.map((section) => document.getElementById(section.id)).filter((element): element is HTMLElement => Boolean(element));
+    if (!elements.length) return;
+    let frame = 0;
+    const updateActiveSection = () => {
+      frame = 0;
+      const rootRect = scrollRoot?.getBoundingClientRect();
+      const viewportTop = rootRect?.top ?? 0;
+      const viewportHeight = rootRect?.height ?? window.innerHeight;
+      const activationLine = viewportTop + Math.min(viewportHeight * 0.32, 220);
+      let nextActive = elements[0].id;
+      for (const element of elements) {
+        if (element.getBoundingClientRect().top <= activationLine) nextActive = element.id;
+        else break;
+      }
+      setActiveSection((current) => current === nextActive ? current : nextActive);
+    };
+    const queueUpdate = () => {
+      if (!frame) frame = window.requestAnimationFrame(updateActiveSection);
+    };
+    updateActiveSection();
+    const scrollTarget: HTMLElement | Window = scrollRoot ?? window;
+    scrollTarget.addEventListener("scroll", queueUpdate, { passive: true });
+    window.addEventListener("resize", queueUpdate);
+    return () => {
+      scrollTarget.removeEventListener("scroll", queueUpdate);
+      window.removeEventListener("resize", queueUpdate);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [preview, sections]);
+  useLayoutEffect(() => {
+    const nav = stickyNavRef.current;
+    const link = activeSection ? stickyLinkRefs.current[activeSection] : null;
+    if (!nav || !link) {
+      setActiveIndicator((current) => current.visible ? { ...current, visible: false } : current);
+      return;
+    }
+    const updateIndicator = () => setActiveIndicator({ left: link.offsetLeft, width: link.offsetWidth, visible: true });
+    updateIndicator();
+    const resizeObserver = new ResizeObserver(updateIndicator);
+    resizeObserver.observe(nav);
+    resizeObserver.observe(link);
+    return () => resizeObserver.disconnect();
+  }, [activeSection, sections]);
   const style = {
     "--event-accent": config.branding.accent,
     "--event-bg": config.branding.background,
@@ -124,25 +184,25 @@ export function EventMicrosite({ event, config = event.eventPage!, preview = fal
   const content = <article className={`event-microsite event-microsite--${config.template} event-microsite--${config.branding.typography}${preview ? " event-microsite--preview" : ""}`} style={style}>
     {config.shell === "microsite" && <header className="event-site-nav"><Link href={`/events/${event.slug}`} className="event-site-logo">{config.branding.logoText}</Link><nav aria-label="Event page navigation">{sections.slice(0, 6).map((section) => <Link key={section.id} href={sectionHref(event, section, preview)}>{section.type === "people" ? "Guests" : section.type}</Link>)}</nav><a className="event-site-nav__action" href={href} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}>{config.primaryAction.label}</a><button type="button" aria-label="Toggle event navigation" aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}>{menuOpen ? <X size={21} /> : <Menu size={21} />}</button>{menuOpen && <div className="event-site-mobile-nav">{sections.map((section) => <Link onClick={() => setMenuOpen(false)} key={section.id} href={sectionHref(event, section, preview)}>{section.title}</Link>)}<a href={href}>{config.primaryAction.label}</a></div>}</header>}
 
-    {hero && <section id={hero.id} className="event-page-hero" style={hero.media ? { backgroundImage: `linear-gradient(90deg, rgba(8,8,10,.72), rgba(8,8,10,.15)), url(${hero.media.src})` } : undefined}><div><span>{event.eyebrow}</span><h1>{hero.title}</h1><p>{hero.subtitle}</p>{hero.countdown && <Countdown target={scheduleStart} />}<a className="event-primary-action" href={href} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}><Ticket size={18} />{config.primaryAction.label}{external && <ExternalLink size={15} />}</a></div></section>}
+    {hero && <section id={hero.id} className="event-page-hero" style={hero.media?.src ? { backgroundImage: `linear-gradient(90deg, rgba(8,8,10,.72), rgba(8,8,10,.15)), url(${hero.media.src})` } : undefined}><div><span>{event.eyebrow}</span><h1>{hero.title}</h1><p>{hero.subtitle}</p>{hero.countdown && <Countdown target={scheduleStart} />}<a className="event-primary-action" href={href} target={external ? "_blank" : undefined} rel={external ? "noreferrer" : undefined}><Ticket size={18} />{config.primaryAction.label}{external && <ExternalLink size={15} />}</a></div></section>}
 
-    <nav className="event-sticky-nav" aria-label="On this event page">{sections.slice(0, 7).map((section) => <Link key={section.id} href={sectionHref(event, section, preview)}>{section.type}</Link>)}</nav>
+    <nav ref={stickyNavRef} className="event-sticky-nav" aria-label="On this event page"><span className="event-sticky-nav__highlight" aria-hidden="true" style={{ left: activeIndicator.left, width: activeIndicator.width, opacity: activeIndicator.visible ? 1 : 0 }} />{sections.slice(0, 7).map((section) => <Link ref={(node) => { stickyLinkRefs.current[section.id] = node; }} key={section.id} className={activeSection === section.id ? "active" : ""} href={`#${section.id}`} onClick={() => setActiveSection(section.id)}>{section.type === "people" ? "Guests" : section.type === "cta" ? "RSVP" : section.type}</Link>)}</nav>
 
     {sections.map((section) => <section key={section.id} id={section.id} className={`event-content-section event-content-section--${section.type} event-content-section--${section.tone ?? "light"}`}>
       <div className="event-content-inner">
         {section.type !== "cta" && <SectionHeading section={section} />}
-        {section.type === "story" && <div className="event-story-content"><div>{section.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}{section.quote && <blockquote>{section.quote}</blockquote>}</div>{section.media && <img src={section.media.src} alt={section.media.alt} />}</div>}
+        {section.type === "story" && <div className="event-story-content"><div>{section.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}{section.quote && <blockquote>{section.quote}</blockquote>}</div>{section.media?.src && <img src={section.media.src} alt={section.media.alt} />}</div>}
         {section.type === "schedule" && <div className="event-schedule-list">{section.items.map((item) => <article key={item.id}><time dateTime={item.startISO}><b>{new Intl.DateTimeFormat("en-NG", { day: "2-digit" }).format(new Date(item.startISO))}</b><span>{new Intl.DateTimeFormat("en-NG", { month: "short", year: "numeric" }).format(new Date(item.startISO))}</span></time><div><small>{item.subtitle}</small><h3>{item.title}</h3><p>{item.description}</p><dl><div><Clock3 size={16} /><span>{new Intl.DateTimeFormat("en-NG", { hour: "numeric", minute: "2-digit" }).format(new Date(item.startISO))} – {new Intl.DateTimeFormat("en-NG", { hour: "numeric", minute: "2-digit" }).format(new Date(item.endISO))}</span></div><div><MapPin size={16} /><span><b>{item.venue}</b>{item.address}</span></div></dl><div className="event-inline-actions"><a href={calendarHref(item)} target="_blank" rel="noreferrer"><CalendarPlus size={15} /> Add to calendar</a>{item.directionsUrl && <a href={item.directionsUrl} target="_blank" rel="noreferrer"><Navigation size={15} /> Directions</a>}</div></div></article>)}</div>}
-        {section.type === "people" && <>{section.intro && <p className="event-section-intro">{section.intro}</p>}<div className="event-people-grid">{section.people.map((person) => <article key={person.id}>{person.image ? <img src={person.image.src} alt={person.image.alt} /> : <span>{person.name.split(" ").map((word) => word[0]).join("").slice(0, 2)}</span>}<h3>{person.name}</h3><b>{person.role}</b>{person.bio && <p>{person.bio}</p>}</article>)}</div></>}
+        {section.type === "people" && <>{section.intro && <p className="event-section-intro">{section.intro}</p>}<div className="event-people-grid">{section.people.map((person) => <article key={person.id}>{person.image?.src ? <img src={person.image.src} alt={person.image.alt} /> : <span>{person.name.split(" ").map((word) => word[0]).join("").slice(0, 2)}</span>}<h3>{person.name}</h3><b>{person.role}</b>{person.bio && <p>{person.bio}</p>}</article>)}</div></>}
         {section.type === "highlights" && <div className="event-highlights-grid">{section.items.map((item, index) => <article key={item.id}><span>{String(index + 1).padStart(2, "0")}</span><h3>{item.title}</h3><p>{item.description}</p></article>)}</div>}
         {section.type === "venue" && <><p className="event-section-intro">{section.description}</p><div className="event-venue-grid">{section.venues.map((venue) => <article key={venue.id}><MapPin size={22} /><h3>{venue.name}</h3><p>{venue.address}</p>{venue.directionsUrl && <a className="event-text-link" href={venue.directionsUrl} target="_blank" rel="noreferrer">Get directions <ExternalLink size={13} /></a>}</article>)}</div></>}
-        {section.type === "travel" && <><p className="event-section-intro">{section.intro}</p><div className="event-travel-grid">{section.items.slice(0, preview ? 3 : undefined).map((item) => { const Icon = item.category === "hotel" ? Hotel : item.category === "transport" ? Plane : item.category === "parking" ? ParkingCircle : MapPin; return <article key={item.id}><Icon size={21} /><h3>{item.title}</h3><p>{item.description}</p>{item.url && <a className="event-text-link" href={item.url} target="_blank" rel="noreferrer">View recommendation <ExternalLink size={13} /></a>}</article>; })}</div>{!preview && <Link className="event-secondary-link" href={`/events/${event.slug}/travel`}>View complete travel guide</Link>}</>}
+        {section.type === "travel" && <><p className="event-section-intro">{section.intro}</p><div className="event-travel-grid">{section.items.slice(0, preview ? 3 : undefined).map((item) => { const Icon = item.media?.src ? (props: { size?: number }) => <img className="event-travel-card__image" src={item.media?.src} alt={item.media?.alt || item.title} /> : TravelImagePlaceholder; return <article key={item.id}><Icon size={21} /><h3>{item.title}</h3><p>{item.description}</p>{item.url && <a className="event-text-link" href={item.url} target="_blank" rel="noreferrer">View recommendation <ExternalLink size={13} /></a>}</article>; })}</div>{!preview && <Link className="event-secondary-link" href={`/events/${event.slug}/travel`}>View complete travel guide</Link>}</>}
         {section.type === "gallery" && <GallerySection section={section} />}
         {section.type === "sponsors" && <>{section.intro && <p className="event-section-intro">{section.intro}</p>}<div className="event-sponsor-row">{section.names.map((name) => <span key={name}>{name}</span>)}</div></>}
         {section.type === "registry" && <><p className="event-section-intro">{section.intro}</p><div className="event-gift-grid">{section.methods.map((method) => <GiftMethodCard key={method.id} method={method} />)}</div>{!preview && <Link className="event-secondary-link" href={`/events/${event.slug}/registry`}>Open registry details</Link>}</>}
         {section.type === "faq" && <><p className="event-section-intro">{section.intro}</p><div className="event-faq-list">{section.items.slice(0, preview ? 3 : undefined).map((item) => <details key={item.id}><summary>{item.question}<ChevronDown size={18} /></summary><p>{item.answer}</p></details>)}</div>{!preview && <Link className="event-secondary-link" href={`/events/${event.slug}/faq`}>View all questions</Link>}</>}
         {section.type === "contact" && <div className="event-contact-block"><p>{section.body}</p>{section.email && <a href={`mailto:${section.email}`}>{section.email}</a>}{section.phone && <a href={`tel:${section.phone.replace(/\s/g, "")}`}>{section.phone}</a>}</div>}
-        {section.type === "cta" && <div className="event-final-cta"><span>{config.branding.logoText}</span><h2>{section.title}</h2><p>{section.body}</p><a className="event-primary-action" href={href}>{section.buttonLabel}</a></div>}
+        {section.type === "cta" && <div className="event-final-cta"><span>{section.eyebrow ?? config.branding.logoText}</span><h2>{section.title}</h2><p>{section.body}</p><a className="event-primary-action" href={href}>{section.buttonLabel}</a></div>}
       </div>
     </section>)}
 

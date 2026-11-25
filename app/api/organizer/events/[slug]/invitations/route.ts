@@ -3,23 +3,23 @@ import { NextResponse } from "next/server";
 import { events, invitations, notificationDeliveries, notifications } from "@/db/schema";
 import { getDatabase } from "@/lib/db/client";
 import { generateInvitationCode, hashInvitationCode, normalizeEmail } from "@/lib/security/invitations";
-import { getOrganizerSession } from "@/lib/server/organizer-auth";
+import { requirePermission } from "@/lib/auth/policy";
 
 async function eventForOrganizer(slug: string, organizerId: string) { const [event] = await getDatabase().select().from(events).where(and(eq(events.slug, slug), eq(events.organizerId, organizerId))).limit(1); return event; }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ slug: string }> }) {
-  const session = await getOrganizerSession();
-  if (!session) return NextResponse.json({ data: null, error: { code: "UNAUTHORIZED", message: "Sign in to continue." } }, { status: 401 });
-  const event = await eventForOrganizer((await params).slug, session.organizerId);
+  const principal = await requirePermission("guests.view");
+  if (!principal) return NextResponse.json({ data: null, error: { code: "FORBIDDEN", message: "You do not have access to guest information." } }, { status: 403 });
+  const event = await eventForOrganizer((await params).slug, principal.organizerId);
   if (!event) return NextResponse.json({ data: null, error: { code: "EVENT_NOT_FOUND", message: "Event not found." } }, { status: 404 });
   const rows = await getDatabase().select({ id: invitations.id, guestName: invitations.guestName, email: invitations.email, phone: invitations.phone, partyAllowance: invitations.partyAllowance, personalization: invitations.personalization, status: invitations.status, deliveryStatus: invitations.deliveryStatus, lastSentAt: invitations.lastSentAt, createdAt: invitations.createdAt, revokedAt: invitations.revokedAt }).from(invitations).where(eq(invitations.eventId, event.id)).orderBy(desc(invitations.createdAt));
   return NextResponse.json({ data: rows, error: null });
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ slug: string }> }) {
-  const session = await getOrganizerSession();
-  if (!session) return NextResponse.json({ data: null, error: { code: "UNAUTHORIZED", message: "Sign in to continue." } }, { status: 401 });
-  const event = await eventForOrganizer((await params).slug, session.organizerId);
+  const principal = await requirePermission("guests.manage");
+  if (!principal) return NextResponse.json({ data: null, error: { code: "FORBIDDEN", message: "You do not have permission to manage invitations." } }, { status: 403 });
+  const event = await eventForOrganizer((await params).slug, principal.organizerId);
   if (!event) return NextResponse.json({ data: null, error: { code: "EVENT_NOT_FOUND", message: "Event not found." } }, { status: 404 });
   const body = await request.json().catch(() => ({})) as { guestName?: string; email?: string; phone?: string; partyAllowance?: number; personalization?: Record<string, unknown>; sendNow?: boolean };
   const guestName = body.guestName?.trim() ?? "";

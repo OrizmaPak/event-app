@@ -1,0 +1,1 @@
+ALTER TABLE "event_staff_assignments" ADD COLUMN "access_code_encrypted" text;
